@@ -1618,17 +1618,16 @@ class spell_shadowmoon_illidari_agent_illusion : public AuraScript
 // 38223 - Quest Credit: Crazed Colossus
 class spell_shadowmoon_quest_credit_crazed_colossus : public SpellScript
 {
-    bool Validate(SpellInfo const* spellInfo) override
+    bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        uint32 spellId = uint32(spellInfo->GetEffect(EFFECT_0).CalcValueAsInt());
-        return (!spellId || ValidateSpellInfo({ spellId }))
-            && ValidateSpellInfo({ SPELL_KILL_CREDIT_CRAZED_COLOSSUS });
+        return ValidateSpellInfo({ SPELL_KILL_CREDIT_CRAZED_COLOSSUS });
     }
 
     void HandleScript(SpellEffIndex /*effIndex*/)
     {
         Unit* target = GetHitUnit();
-        if (target->HasAura(uint32(GetEffectValueAsInt())))
+        uint32 requiredAura = uint32(GetEffectValueAsInt());
+        if (requiredAura && target->HasAura(requiredAura))
             target->CastSpell(target, SPELL_KILL_CREDIT_CRAZED_COLOSSUS);
     }
 

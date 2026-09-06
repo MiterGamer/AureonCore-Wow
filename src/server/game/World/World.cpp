@@ -802,8 +802,10 @@ void World::LoadConfigSettings(bool reload)
         { .Name = "CreatureFamilyAssistanceDelay"sv, .DefaultValue = 1500, .Index = CONFIG_CREATURE_FAMILY_ASSISTANCE_DELAY },
         { .Name = "CreatureFamilyFleeDelay"sv, .DefaultValue = 7000, .Index = CONFIG_CREATURE_FAMILY_FLEE_DELAY },
         { .Name = "WorldBossLevelDiff"sv, .DefaultValue = 3, .Index = CONFIG_WORLD_BOSS_LEVEL_DIFF },
-        { .Name = "Quests.LowLevelHideDiff"sv, .DefaultValue = 4, .Index = CONFIG_QUEST_LOW_LEVEL_HIDE_DIFF, .Max = MAX_LEVEL },
-        { .Name = "Quests.HighLevelHideDiff"sv, .DefaultValue = 7, .Index = CONFIG_QUEST_HIGH_LEVEL_HIDE_DIFF, .Max = MAX_LEVEL },
+        // Min -1 ("show all marks") cannot go through uint32 StoreConfigValue Min/Max
+        // (uint32(-1) vs MAX_LEVEL ping-pongs and always lands on MAX_LEVEL).
+        { .Name = "Quests.LowLevelHideDiff"sv, .DefaultValue = 4, .Index = CONFIG_QUEST_LOW_LEVEL_HIDE_DIFF },
+        { .Name = "Quests.HighLevelHideDiff"sv, .DefaultValue = 7, .Index = CONFIG_QUEST_HIGH_LEVEL_HIDE_DIFF },
         { .Name = "Battleground.Random.ResetHour"sv, .DefaultValue = 6, .Index = CONFIG_RANDOM_BG_RESET_HOUR, .Min = 0, .Max = 23 },
         { .Name = "Calendar.DeleteOldEventsHour"sv, .DefaultValue = 6, .Index = CONFIG_CALENDAR_DELETE_OLD_EVENTS_HOUR, .Min = 0, .Max = 23 },
         { .Name = "Guild.ResetHour"sv, .DefaultValue = 6, .Index = CONFIG_GUILD_RESET_HOUR, .Min = 0, .Max = 23 },
@@ -1026,6 +1028,24 @@ void World::LoadConfigSettings(bool reload)
 
     for (ConfigOptionLoadDefinition<uint32, WorldIntConfigs> const& definition : ints)
         StoreConfigValue(m_int_configs[definition.Index], sConfigMgr->GetIntDefault(definition.Name, definition.DefaultValue), definition, reload);
+
+    auto clampSignedQuestHideDiff = [](uint32& stored, char const* name)
+    {
+        int32 value = int32(stored);
+        if (value < -1)
+        {
+            TC_LOG_ERROR("server.loading", "{} {} must be >= -1. Using -1 instead.", name, value);
+            value = -1;
+        }
+        else if (value > MAX_LEVEL)
+        {
+            TC_LOG_ERROR("server.loading", "{} {} must be <= {}. Using {} instead.", name, value, MAX_LEVEL, MAX_LEVEL);
+            value = MAX_LEVEL;
+        }
+        stored = uint32(value);
+    };
+    clampSignedQuestHideDiff(m_int_configs[CONFIG_QUEST_LOW_LEVEL_HIDE_DIFF], "Quests.LowLevelHideDiff");
+    clampSignedQuestHideDiff(m_int_configs[CONFIG_QUEST_HIGH_LEVEL_HIDE_DIFF], "Quests.HighLevelHideDiff");
 
     for (ConfigOptionLoadDefinition<uint64, WorldInt64Configs> const& definition : int64s)
         StoreConfigValue(m_int64_configs[definition.Index], sConfigMgr->GetInt64Default(definition.Name, definition.DefaultValue), definition, reload);

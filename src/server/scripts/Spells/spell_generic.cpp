@@ -3432,15 +3432,21 @@ class spell_gen_teleporting : public SpellScript
 
 class spell_gen_trigger_exclude_caster_aura_spell : public SpellScript
 {
-    bool Validate(SpellInfo const* spellInfo) override
+    bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return !spellInfo->ExcludeCasterAuraSpell || ValidateSpellInfo({ spellInfo->ExcludeCasterAuraSpell });
+        // ExcludeCasterAuraSpell may point at a rank removed in this build.
+        // Do not disable the whole spell (Life Tap, Soulburn, …) for that.
+        return true;
     }
 
     void HandleTrigger()
     {
+        uint32 const spellId = GetSpellInfo()->ExcludeCasterAuraSpell;
+        if (!spellId || !sSpellMgr->GetSpellInfo(spellId, GetCastDifficulty()))
+            return;
+
         // Blizz seems to just apply aura without bothering to cast
-        GetCaster()->AddAura(GetSpellInfo()->ExcludeCasterAuraSpell, GetCaster());
+        GetCaster()->AddAura(spellId, GetCaster());
     }
 
     void Register() override
@@ -3451,16 +3457,19 @@ class spell_gen_trigger_exclude_caster_aura_spell : public SpellScript
 
 class spell_gen_trigger_exclude_target_aura_spell : public SpellScript
 {
-    bool Validate(SpellInfo const* spellInfo) override
+    bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return !spellInfo->ExcludeTargetAuraSpell || ValidateSpellInfo({ spellInfo->ExcludeTargetAuraSpell });
+        return true;
     }
 
     void HandleTrigger()
     {
+        uint32 const spellId = GetSpellInfo()->ExcludeTargetAuraSpell;
+        if (!spellId || !sSpellMgr->GetSpellInfo(spellId, GetCastDifficulty()))
+            return;
+
         if (Unit* target = GetHitUnit())
-            // Blizz seems to just apply aura without bothering to cast
-            GetCaster()->AddAura(GetSpellInfo()->ExcludeTargetAuraSpell, target);
+            GetCaster()->AddAura(spellId, target);
     }
 
     void Register() override

@@ -58,11 +58,14 @@ struct boss_tunk : public BossAI
         _JustDied();
     }
 
-    void EnterEvadeMode(EvadeReason /*why*/) override
+    void EnterEvadeMode(EvadeReason why) override
     {
+        // Map 2236 mmaps drop degenerate splines; Tunk despawning here bricks GO 334502 forever.
+        if (why == EvadeReason::NoPath)
+            return;
+
         instance->SendEncounterUnit(ENCOUNTER_FRAME_DISENGAGE, me);
-        _EnterEvadeMode();
-        _DespawnAtEvade();
+        BossAI::EnterEvadeMode(why);
     }
 
     void JustEngagedWith(Unit* who) override

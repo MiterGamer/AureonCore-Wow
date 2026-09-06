@@ -629,6 +629,23 @@ void PathGenerator::NormalizePath()
 {
     for (uint32 i = 0; i < _pathPoints.size(); ++i)
         _source->UpdateAllowedPositionZ(_pathPoints[i].x, _pathPoints[i].y, _pathPoints[i].z);
+
+    if (_pathPoints.size() <= 2)
+        return;
+
+    constexpr float minSegmentSq = 0.01f;
+    G3D::Vector3 const dest = _pathPoints.back();
+    std::size_t write = 1;
+    for (std::size_t read = 1; read < _pathPoints.size(); ++read)
+        if ((_pathPoints[read] - _pathPoints[write - 1]).squaredLength() >= minSegmentSq)
+            _pathPoints[write++] = _pathPoints[read];
+    if (write < 2)
+    {
+        _pathPoints[1] = dest;
+        _pathPoints.resize(2);
+        return;
+    }
+    _pathPoints.resize(write);
 }
 
 void PathGenerator::BuildShortcut()

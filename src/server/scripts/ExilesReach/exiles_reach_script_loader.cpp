@@ -21,6 +21,8 @@ void AddSC_zone_exiles_reach();
 // Darkmaul Citacel
 void AddSC_instance_darkmaul_citadel();
 void AddSC_boss_tunk();
+void AddSC_boss_gorgroth();
+void AddSC_boss_ravnyr();
 
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
@@ -31,4 +33,6 @@ void AddExilesReachScripts()
     // Darkmaul Citacel
     AddSC_instance_darkmaul_citadel();
     AddSC_boss_tunk();
+    AddSC_boss_gorgroth();
+    AddSC_boss_ravnyr();
 }

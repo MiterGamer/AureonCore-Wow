@@ -116,6 +116,20 @@ namespace Movement
         args.flags.Enter_Cycle = args.flags.Cyclic;
         move_spline.onTransport = transport;
 
+        // Recast (and Z-snap) can emit consecutive corners on top of each other.
+        // MoveSplineInitArgs::_checkPathLengths() rejects those paths and the unit never moves.
+        constexpr float minSegmentSq = 0.01f;
+        if (args.path.size() > 2)
+        {
+            std::size_t write = 1;
+            for (std::size_t read = 1; read < args.path.size(); ++read)
+                if ((args.path[read] - args.path[write - 1]).squaredLength() >= minSegmentSq)
+                    args.path[write++] = args.path[read];
+            args.path.resize(write);
+            if (args.path.size() < 2)
+                return 0;
+        }
+
         MovementFlags moveFlags = unit->m_movementInfo.GetMovementFlags();
         if (!args.flags.Backward)
             moveFlags = (moveFlags & ~MOVEMENTFLAG_BACKWARD) | MOVEMENTFLAG_FORWARD;

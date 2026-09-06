@@ -17,6 +17,7 @@
 
 #include "LFGQueue.h"
 #include "Containers.h"
+#include "DB2Stores.h"
 #include "GameTime.h"
 #include "Group.h"
 #include "LFGMgr.h"
@@ -25,6 +26,28 @@
 
 namespace lfg
 {
+
+// LFGDungeons.db2 MinCount* — Darkmaul Citadel 2043 is 0/0/1 so a solo queue must form.
+static uint8 GetDungeonMinPlayers(LfgDungeonSet const& dungeons)
+{
+    uint8 minPlayers = 0;
+    for (uint32 dungeonId : dungeons)
+    {
+        LFGDungeonsEntry const* dungeon = sLFGDungeonsStore.LookupEntry(dungeonId);
+        if (!dungeon)
+            continue;
+
+        uint8 needed = dungeon->MinCountTank + dungeon->MinCountHealer + dungeon->MinCountDamage;
+        if (!needed)
+            needed = 1;
+
+        if (needed > minPlayers)
+            minPlayers = needed;
+    }
+
+    return minPlayers ? minPlayers : uint8(MAX_GROUP_SIZE);
+}
+
 
 /**
    Given a list of guids returns the concatenation using | as delimiter
@@ -420,19 +443,23 @@ LfgCompatibility LFGQueue::CheckCompatibility(GuidList check)
         }
     }
 
-    // Group with less that MAX_GROUP_SIZE members always compatible
-    if (check.size() == 1 && numPlayers != MAX_GROUP_SIZE)
+    // Solo / undersized party: wait only if this dungeon still needs more players.
+    if (check.size() == 1)
     {
-        TC_LOG_DEBUG("lfg.queue.match.compatibility.check", "Guids: ({}) single group. Compatibles", GetDetailedMatchRoles(check));
         LfgQueueDataContainer::iterator itQueue = QueueDataStore.find(check.front());
+        uint8 neededPlayers = GetDungeonMinPlayers(itQueue->second.dungeons);
+        if (numPlayers < neededPlayers)
+        {
+            TC_LOG_DEBUG("lfg.queue.match.compatibility.check", "Guids: ({}) single group. Compatibles", GetDetailedMatchRoles(check));
 
-        LfgCompatibilityData data(LFG_COMPATIBLES_WITH_LESS_PLAYERS);
-        data.roles = itQueue->second.roles;
-        LFGMgr::CheckGroupRoles(data.roles);
+            LfgCompatibilityData data(LFG_COMPATIBLES_WITH_LESS_PLAYERS);
+            data.roles = itQueue->second.roles;
+            LFGMgr::CheckGroupRoles(data.roles);
 
-        UpdateBestCompatibleInQueue(itQueue, strGuids, data.roles);
-        SetCompatibilityData(strGuids, data);
-        return LFG_COMPATIBLES_WITH_LESS_PLAYERS;
+            UpdateBestCompatibleInQueue(itQueue, strGuids, data.roles);
+            SetCompatibilityData(strGuids, data);
+            return LFG_COMPATIBLES_WITH_LESS_PLAYERS;
+        }
     }
 
     if (numLfgGroups > 1)
@@ -518,8 +545,9 @@ LfgCompatibility LFGQueue::CheckCompatibility(GuidList check)
         LFGMgr::CheckGroupRoles(proposalRoles);          // assing new roles
     }
 
-    // Enough players?
-    if (numPlayers != MAX_GROUP_SIZE)
+    // Enough players for this dungeon (MinCountTank/Healer/Damage from LFGDungeons.db2)?
+    uint8 neededPlayers = GetDungeonMinPlayers(proposalDungeons);
+    if (numPlayers < neededPlayers)
     {
         TC_LOG_DEBUG("lfg.queue.match.compatibility.check", "Guids: ({}) Compatibles but not enough players({})", GetDetailedMatchRoles(check), numPlayers);
         LfgCompatibilityData data(LFG_COMPATIBLES_WITH_LESS_PLAYERS);

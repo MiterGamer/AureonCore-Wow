@@ -99,7 +99,9 @@ void Hello::Read()
 void OpenTradeskillNpc::Read()
 {
     _worldPacket >> Npc;
-    if (!_worldPacket.empty())
+    // 12.1 often sends only the packed NPC guid (6 bytes). ByteBuffer::empty()
+    // checks storage, not remaining unread bytes — do not read SkillLineID past EOF.
+    if (_worldPacket.size() - _worldPacket.rpos() >= sizeof(int32))
         _worldPacket >> SkillLineID;
 }
 

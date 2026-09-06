@@ -31,7 +31,9 @@
 #include "PassiveAI.h"
 #include "PhasingHandler.h"
 #include "Player.h"
+#include "QuestDef.h"
 #include "ScriptedCreature.h"
+#include "ScriptedGossip.h"
 #include "SpellAuras.h"
 #include "SpellHistory.h"
 #include "SpellInfo.h"
@@ -285,68 +287,6 @@ enum StandYourGroundData
     SPELL_UPDATE_PHASE_SHIFT            = 82238,
 };
 
-enum FirstMateWorldSpawn
-{
-    SPAWN_PRIVATE_COLE_SHIP = 42150,
-    SPAWN_GRUNT_THROG_SHIP  = 42167,
-    NPC_PRIVATE_COLE_SHIP   = 160664,
-    NPC_GRUNT_THROG_SHIP    = 166583
-};
-
-static Creature* FindWorldFirstMate(WorldObject const* obj, uint32 entry, ObjectGuid::LowType spawnId)
-{
-    if (!obj)
-        return nullptr;
-
-    if (Map* map = obj->GetMap())
-    {
-        for (auto const& pair : Trinity::Containers::MapEqualRange(map->GetCreatureBySpawnIdStore(), spawnId))
-            if (Creature* mate = pair.second)
-                if (mate->GetEntry() == entry && !mate->IsPrivateObject())
-                    return mate;
-    }
-
-    std::vector<Creature*> mates;
-    obj->GetCreatureListWithOptionsInGrid(mates, 150.0f, { .CreatureId = entry, .IgnorePhases = true, .IgnorePrivateObjects = true });
-    for (Creature* mate : mates)
-        if (mate && mate->GetSpawnId())
-            return mate;
-
-    return nullptr;
-}
-
-static void SetWorldFirstMateForSpar(Player* player, bool hideWorldNpc)
-{
-    if (!player)
-        return;
-
-    uint32 const entry = player->GetTeam() == ALLIANCE ? NPC_PRIVATE_COLE_SHIP : NPC_GRUNT_THROG_SHIP;
-    ObjectGuid::LowType const spawnId = player->GetTeam() == ALLIANCE ? SPAWN_PRIVATE_COLE_SHIP : SPAWN_GRUNT_THROG_SHIP;
-
-    if (Creature* mate = FindWorldFirstMate(player, entry, spawnId))
-    {
-        mate->SetImmuneToPC(true);
-        mate->SetVisible(!hideWorldNpc);
-        mate->SetUninteractible(hideWorldNpc);
-    }
-    else if (!hideWorldNpc)
-    {
-        if (Map* map = player->GetMap())
-            map->Respawn(SPAWN_TYPE_CREATURE, spawnId);
-    }
-
-    // Extra Cole/Throg clones only — never the world spawn (GetSpawnId != 0)
-    std::list<Creature*> clones;
-    player->GetCreatureListWithEntryInGrid(clones, entry, 80.0f);
-    for (Creature* clone : clones)
-    {
-        if (!clone || clone->GetSpawnId())
-            continue;
-        if (clone->IsPrivateObject() || clone->IsSummon())
-            clone->DespawnOrUnsummon();
-    }
-}
-
 // 58209 - Stand Your Ground
 // 59927 - Stand Your Ground
 class quest_stand_your_ground : public QuestScript
@@ -356,17 +296,20 @@ public:
 
     void OnQuestStatusChange(Player* player, Quest const* /*quest*/, QuestStatus /*oldStatus*/, QuestStatus newStatus) override
     {
-        if (newStatus == QUEST_STATUS_INCOMPLETE)
+        // World Cole/Throg live in phase 13753/15284. Those phases apply while
+        // Stand Your Ground is not in progress, so UPDATE_PHASE_SHIFT is enough
+        // to bring the questgiver back after the spar. Do not SetVisible() on the
+        // world spawn — that hides him for every player and never finds guid 1050146
+        // (the old lookup used WCDB spawn 42150).
+        if (newStatus == QUEST_STATUS_NONE)
         {
-            SetWorldFirstMateForSpar(player, true);
+            player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
+            player->CastSpell(player, SPELL_COMBAT_TRAINING_COMPLETE);
             return;
         }
 
-        // Complete / drop / reward: world Cole must be visible again to turn in
-        SetWorldFirstMateForSpar(player, false);
-        player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
-        if (newStatus == QUEST_STATUS_NONE)
-            player->CastSpell(player, SPELL_COMBAT_TRAINING_COMPLETE);
+        if (newStatus == QUEST_STATUS_COMPLETE)
+            player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
     }
 };
 
@@ -466,8 +409,6 @@ struct npc_sparring_partner_exiles_reach : public ScriptedAI
             me->DespawnOrUnsummon();
             owner->CastSpell(owner, SPELL_UPDATE_PHASE_SHIFT);
             owner->CastSpell(owner, SPELL_COMBAT_TRAINING_COMPLETE);
-            if (Player* player = owner->ToPlayer())
-                SetWorldFirstMateForSpar(player, false);
         }
     }
 
@@ -488,7 +429,6 @@ struct npc_sparring_partner_exiles_reach : public ScriptedAI
                 Talk(TALK_SPARING_COMPLETE, player);
                 player->CastSpell(player, SPELL_COMBAT_TRAINING);
                 player->KilledMonsterCredit(NPC_KILL_CREDIT);
-                SetWorldFirstMateForSpar(player, false);
             }
         }
 
@@ -592,7 +532,8 @@ enum FirstMateStandYourGroundData
 
 // 160664 - Private Cole
 // 166583 - Grunt Throg
-// World spawn only: questgiver. Never attackable. Hidden while the spar clone is out.
+// World spawn: questgiver. Never attackable. Phase 13753/15284 hides him during
+// the spar and restores him for turn-in.
 struct npc_first_mate_stand_your_ground : public ScriptedAI
 {
     npc_first_mate_stand_your_ground(Creature* creature) : ScriptedAI(creature) { }
@@ -600,6 +541,8 @@ struct npc_first_mate_stand_your_ground : public ScriptedAI
     void JustAppeared() override
     {
         me->SetImmuneToPC(true);
+        me->SetVisible(true);
+        me->SetUninteractible(false);
         me->SetFaction(me->GetCreatureTemplate()->faction);
     }
 
@@ -609,10 +552,7 @@ struct npc_first_mate_stand_your_ground : public ScriptedAI
             return;
 
         player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
-        // 303064/325107 spawn another Cole/Throg clone. Only the combat-training
-        // summon (157051/166814) should appear; the world NPC is hidden.
         player->CastSpell(player, quest->GetQuestId() == QUEST_STAND_YOUR_GROUND_ALLIANCE ? SPELL_SUMMON_COLE_COMBAT : SPELL_SUMMON_THROG_COMBAT);
-        SetWorldFirstMateForSpar(player, true);
     }
 };
 
@@ -1612,7 +1552,8 @@ enum ExilesReachAllianceSurvivorsBeachData
     PATH_BJORN_STOUTHANDS_STANDING        = ((1052013 * 10) + 1) << 3,
     PATH_AUSTIN_HUXWORTH_STANDING         = ((1052014 * 10) + 1) << 3,
 
-    SPELL_BANDAGING_QUEST                 = 297415
+    SPELL_BANDAGING_QUEST                 = 297415,
+    SPELL_SURVIVOR_INTERACT_TUTORIAL      = 300260 // sniff InteractSpellID on laying survivors
 };
 
 // 156609 - Bjorn Stouthands
@@ -1622,6 +1563,12 @@ template<uint32 ConversationId>
 struct npc_alliance_survivors_beach_laying : public ScriptedAI
 {
     npc_alliance_survivors_beach_laying(Creature* creature) : ScriptedAI(creature) { }
+
+    void JustAppeared() override
+    {
+        me->SetNpcFlag(UNIT_NPC_FLAG_SPELLCLICK);
+        me->SetInteractSpellId(SPELL_SURVIVOR_INTERACT_TUTORIAL);
+    }
 
     void SpellHit(WorldObject* caster, SpellInfo const* spellInfo) override
     {
@@ -1671,6 +1618,12 @@ struct npc_bo_beach_laying : public ScriptedAI
 {
     npc_bo_beach_laying(Creature* creature) : ScriptedAI(creature) { }
 
+    void JustAppeared() override
+    {
+        me->SetNpcFlag(UNIT_NPC_FLAG_SPELLCLICK);
+        me->SetInteractSpellId(SPELL_SURVIVOR_INTERACT_TUTORIAL);
+    }
+
     void SpellHit(WorldObject* caster, SpellInfo const* spellInfo) override
     {
         if (spellInfo->Id != SPELL_BANDAGING_QUEST)
@@ -1693,6 +1646,12 @@ struct npc_mithran_dawntracker_beach_laying : public ScriptedAI
 {
     npc_mithran_dawntracker_beach_laying(Creature* creature) : ScriptedAI(creature) { }
 
+    void JustAppeared() override
+    {
+        me->SetNpcFlag(UNIT_NPC_FLAG_SPELLCLICK);
+        me->SetInteractSpellId(SPELL_SURVIVOR_INTERACT_TUTORIAL);
+    }
+
     void SpellHit(WorldObject* caster, SpellInfo const* spellInfo) override
     {
         if (spellInfo->Id != SPELL_BANDAGING_QUEST)
@@ -1714,6 +1673,12 @@ struct npc_mithran_dawntracker_beach_laying : public ScriptedAI
 struct npc_lana_jordan_beach_laying : public ScriptedAI
 {
     npc_lana_jordan_beach_laying(Creature* creature) : ScriptedAI(creature) { }
+
+    void JustAppeared() override
+    {
+        me->SetNpcFlag(UNIT_NPC_FLAG_SPELLCLICK);
+        me->SetInteractSpellId(SPELL_SURVIVOR_INTERACT_TUTORIAL);
+    }
 
     void SpellHit(WorldObject* caster, SpellInfo const* spellInfo) override
     {
@@ -2137,6 +2102,8 @@ public:
 
                 break;
             case QUEST_STATUS_NONE:
+            case QUEST_STATUS_COMPLETE:
+            case QUEST_STATUS_REWARDED:
                 player->RemoveAura(summonSpellId);
                 player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
                 break;
@@ -2298,7 +2265,10 @@ struct areatrigger_find_the_lost_expedition : AreaTriggerAI
         if (!player)
             return;
 
-        if (player->GetQuestStatus(QUEST_FINDING_THE_LOST_EXPEDITION_ALLIANCE) == QUEST_STATUS_COMPLETE || player->GetQuestStatus(QUEST_FINDING_THE_LOST_EXPEDITION_HORDE) == QUEST_STATUS_INCOMPLETE)
+        QuestStatus allianceStatus = player->GetQuestStatus(QUEST_FINDING_THE_LOST_EXPEDITION_ALLIANCE);
+        QuestStatus hordeStatus = player->GetQuestStatus(QUEST_FINDING_THE_LOST_EXPEDITION_HORDE);
+        if (allianceStatus == QUEST_STATUS_INCOMPLETE || allianceStatus == QUEST_STATUS_COMPLETE
+            || hordeStatus == QUEST_STATUS_INCOMPLETE || hordeStatus == QUEST_STATUS_COMPLETE)
             player->CastSpell(player, SPELL_GARRICK_PING);
     }
 };
@@ -5865,6 +5835,31 @@ class spell_resizer_hit_three_q56034 : public SpellScript
     }
 };
 
+// 305742 - Resizer Hit
+// Sniff 14-55-01: 15s player aura, ActiveFlags effect 3. Phase 13775 (clickable 156595)
+// is gated on this aura being gone; update phasing when it expires.
+class spell_resizer_hit_three_aura_q56034 : public AuraScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_UPDATE_PHASE_SHIFT });
+    }
+
+    void OnRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+    {
+        Player* player = Object::ToPlayer(GetTarget());
+        if (!player)
+            return;
+
+        player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
+    }
+
+    void Register() override
+    {
+        AfterEffectRemove += AuraEffectRemoveFn(spell_resizer_hit_three_aura_q56034::OnRemove, EFFECT_3, SPELL_AURA_ANY, AURA_EFFECT_HANDLE_REAL);
+    }
+};
+
 // 325346 - Re-Sizing
 class spell_re_sizing_q59941 : public SpellScript
 {
@@ -6039,6 +6034,7 @@ enum QuestRideBoar
 {
     NPC_ALLIANCE_CAPTAIN                            = 174955,
     NPC_HENRY_GARRICK_PRISONER                      = 156799,
+    NPC_GIANT_BOAR_VEHICLE                          = 156267,
 
     SPELL_SUMMON_DARKMAUL_PLAINS_QUESTGIVERS_SUMMON = 305779,
     SPELL_SUMMON_DARKMAUL_PLAINS_QUESTGIVERS_AURA   = 305776,
@@ -6047,8 +6043,29 @@ enum QuestRideBoar
     SPELL_RITUAL_SCENE_OGRE_CITADEL_DNT             = 321693,
     SPELL_RITUAL_SCENE_HRUN_BEAM_DNT                = 321692,
     SPELL_RITUAL_SCENE_HARPY_BEAM_DNT               = 321691,
-    SPELL_RITUAL_SCENE_MAIN_BEAM_DNT                = 321690
+    SPELL_RITUAL_SCENE_MAIN_BEAM_DNT                = 321690,
+    SPELL_RIDING_GIANT_BOAR_CONTROL                 = 173426,
+    SPELL_SUMMON_GIANT_BOAR_VEHICLE                 = 305068,
+    SPELL_GIANT_BOAR_RIDE_AURA                      = 321670
 };
+
+// Phase 13775 (clickable 156595) is blocked by leftover ride auras after a failed mount.
+static void ClearStaleGiantBoarRideAuras(Player* player, bool removeResizerHit)
+{
+    if (!player)
+        return;
+
+    if (Unit const* vehicle = player->GetVehicleBase())
+        if (vehicle->GetEntry() == NPC_GIANT_BOAR_VEHICLE)
+            return;
+
+    if (removeResizerHit)
+        player->RemoveAurasDueToSpell(SPELL_RESIZER_HIT_THREE_Q56034);
+
+    player->RemoveAurasDueToSpell(SPELL_RIDING_GIANT_BOAR_CONTROL);
+    player->RemoveAurasDueToSpell(SPELL_SUMMON_GIANT_BOAR_VEHICLE);
+    player->RemoveAurasDueToSpell(SPELL_GIANT_BOAR_RIDE_AURA);
+}
 
 static constexpr Position ReDeatherAbandonTeleportPos = { 102.3f, -2422.5f, 90.1f, 0.764454185962677001f };
 
@@ -6063,6 +6080,8 @@ public:
         switch (newStatus)
         {
             case QUEST_STATUS_INCOMPLETE:
+                // Sniff 14-55-01: 305742/173426/321670 are gone when 55879 is accepted.
+                ClearStaleGiantBoarRideAuras(player, true);
                 player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
                 player->CastSpell(player, SPELL_SUMMON_DARKMAUL_PLAINS_QUESTGIVERS_SUMMON);
                 break;
@@ -6084,6 +6103,7 @@ public:
                 player->RemoveAura(SPELL_RITUAL_SCENE_HARPY_BEAM_DNT);
                 player->RemoveAura(SPELL_RITUAL_SCENE_MAIN_BEAM_DNT);
                 player->RemoveAura(SPELL_SUMMON_DARKMAUL_PLAINS_QUESTGIVERS_AURA);
+                ClearStaleGiantBoarRideAuras(player, true);
                 player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
                 player->NearTeleportTo(ReDeatherAbandonTeleportPos);
                 break;
@@ -6195,6 +6215,7 @@ class spell_riding_giant_boar_q55879 : public AuraScript
 
         player->RemoveAura(SPELL_RIDING_GIANT_BOAR_305068);
         player->RemoveAura(SPELL_RIDING_GIANT_BOAR_321670);
+        player->RemoveAurasDueToSpell(SPELL_RESIZER_HIT_THREE_Q56034);
         player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
     }
 
@@ -6433,6 +6454,7 @@ enum GiantBoar
     EVENT_GIANT_BOAR_SIZE_FOUR          = 4,
     EVENT_GIANT_BOAR_EJECT_PASSENGERS   = 5,
     EVENT_GIANT_BOAR_UNROOT             = 6,
+    EVENT_GIANT_BOAR_ALLOW_MOVE         = 7,
 
     SOUND_ENLARGE_BOAR                  = 157516,
     SOUND_SHRINK_BOAR                   = 157517,
@@ -6450,7 +6472,10 @@ struct npc_giant_boar_vehicle_q55879 : public VehicleAI
 
     void JustAppeared() override
     {
-        me->SetSpeed(MOVE_RUN, 14.0f);
+        // Sniff 14-55-01 CreateObject2: WalkSpeed 16, RunSpeed 16, DisableGravity.
+        me->SetSpeed(MOVE_WALK, 16.0f);
+        me->SetSpeed(MOVE_RUN, 16.0f);
+        me->SetDisableGravity(true);
     }
 
     void PassengerBoarded(Unit* passenger, int8 /*seatId*/, bool apply) override
@@ -6470,7 +6495,12 @@ struct npc_giant_boar_vehicle_q55879 : public VehicleAI
 
     void SpellHit(WorldObject* /*caster*/, SpellInfo const* spellInfo) override
     {
-        if (spellInfo->Id == SPELL_ENHANCED_BOAR_PING_VEHICLE)
+        if (spellInfo->Id == SPELL_PING_GARRICK_TO_RIDE_BOAR)
+        {
+            // Sniff 14-55-01: 316984 hits 156267; MOVE_UNROOT + ENABLE_GRAVITY 1.8s later.
+            _events.ScheduleEvent(EVENT_GIANT_BOAR_ALLOW_MOVE, 2s);
+        }
+        else if (spellInfo->Id == SPELL_ENHANCED_BOAR_PING_VEHICLE)
         {
             me->HandleEmoteCommand(EMOTE_ONESHOT_CUSTOM_SPELL_01);
             me->SetControlled(true, UNIT_STATE_ROOT);
@@ -6485,15 +6515,16 @@ struct npc_giant_boar_vehicle_q55879 : public VehicleAI
 
     void UpdateAI(uint32 diff) override
     {
-        if (!_endOfScene)
-            return;
-
         _events.Update(diff);
 
         while (uint32 eventId = _events.ExecuteEvent())
         {
             switch (eventId)
             {
+                case EVENT_GIANT_BOAR_ALLOW_MOVE:
+                    me->SetDisableGravity(false);
+                    me->SetControlled(false, UNIT_STATE_ROOT);
+                    break;
                 case EVENT_GIANT_BOAR_SIZE_ONE:
                     me->PlayDirectSound(SOUND_ENLARGE_BOAR);
                     me->SetObjectScale(1.2f);
@@ -7122,6 +7153,688 @@ CreatureAI* WansaRuinsSelector(Creature* creature)
         return new NullCreatureAI(creature);
 }
 
+enum WhoLurksInThePitData
+{
+    QUEST_WHO_LURKS_IN_THE_PIT_ALLIANCE = 55639,
+    QUEST_WHO_LURKS_IN_THE_PIT_HORDE    = 59949,
+    SCENE_RALIA_ELK_RIDE                = 2379
+};
+
+enum RescueOfMeredyData
+{
+    QUEST_RESCUE_OF_MEREDY              = 55763,
+
+    NPC_MEREDY_HUNTSWELL_RITUAL         = 153211,
+    NPC_BLOODBEAK                       = 153964,
+    NPC_HARPY_AMBUSHER                  = 155192,
+    NPC_HENRY_RESCUE_HELPER             = 155197,
+    NPC_KEELA_RESCUE_HELPER             = 155199,
+    NPC_HUNTING_WORG_RESCUE             = 169162,
+
+    GOSSIP_MENU_MEREDY_RITUAL           = 24887,
+    GOSSIP_OPTION_MEREDY_RITUAL         = 0,
+
+    SAY_MEREDY_BREAK_FREE               = 0,
+    SAY_MEREDY_LETS_GO                  = 1,
+
+    FACTION_HOSTILE_NPE                 = 14,
+    FACTION_BLOODBEAK                   = 16,
+    FACTION_RESCUE_HELPER               = 2713,
+
+    CONVERSATION_RESCUE_HELPERS         = 11738,
+    CONVERSATION_RESCUE_BLOODBEAK       = 11739,
+
+    SPELL_HENRY_FLASH_HEAL              = 172816,
+
+    EVENT_RESCUE_WAVE_2                 = 1,
+    EVENT_RESCUE_SUMMON_KEELA,
+    EVENT_RESCUE_SUMMON_HENRY,
+    EVENT_RESCUE_WAVE_3,
+    EVENT_RESCUE_WAVE_4,
+    EVENT_RESCUE_CONVERSATION_BLOODBEAK,
+    EVENT_RESCUE_SUMMON_BLOODBEAK,
+    EVENT_HENRY_HEAL,
+
+    POINT_RESCUE_ROOST_ENTRANCE         = 1
+};
+
+Position const HarpyAmbusherSummonPosWest = { 484.2205f, -2363.0017f, 159.88463f, 0.0f };
+Position const HarpyAmbusherSummonPosEast = { 512.21356f, -2352.1094f, 160.9194f, 3.647948f };
+Position const HuntingWorgWave2Pos = { 506.53516f, -2347.605f, 160.85416f, 4.9748764f };
+Position const HarpyAmbusherWave2Pos = { 508.42142f, -2364.0752f, 160.81804f, 2.7085032f };
+Position const HuntingWorgWave3Pos[3] =
+{
+    { 511.30902f, -2365.4097f, 159.98203f, 2.235991f },
+    { 484.2205f, -2363.0017f, 159.88463f, 1.2384754f },
+    { 491.93228f, -2340.7153f, 161.85861f, 4.7904596f }
+};
+Position const HarpyAmbusherWave4Pos = { 494.88715f, -2370.54f, 158.73819f, 1.0957633f };
+Position const HuntingWorgWave4Pos[2] =
+{
+    { 506.1545f, -2346.1875f, 161.34563f, 5.5087867f },
+    { 512.21356f, -2352.1094f, 160.9194f, 3.3940632f }
+};
+Position const KeeLaRescueHelperPos = { 494.87152f, -2383.691f, 155.85905f, 1.3384759f };
+Position const HenryRescueHelperPos = { 492.3885f, -2373.8032f, 158.27975f, 1.4001937f };
+Position const BloodbeakDescendPos = { 490.96936f, -2423.2778f, 174.1366f, 1.5158213f };
+Position const RescueRoostEntrancePos = { 393.21875f, -2442.9307f, 125.913445f, 2.7876916f };
+
+static Player* GetRescuePlayer(Creature const* source, ObjectGuid const& playerGuid)
+{
+    return ObjectAccessor::GetPlayer(*source, playerGuid);
+}
+
+static Creature* SummonRescueHostile(Creature* meredy, Player* player, uint32 entry, Position const& pos, bool hover, uint32 faction)
+{
+    Creature* summoned = meredy->SummonCreature(entry, pos, TEMPSUMMON_DEAD_DESPAWN);
+    if (!summoned)
+        return nullptr;
+
+    summoned->SetFaction(faction);
+    if (hover)
+    {
+        summoned->SetAnimTier(AnimTier::Hover);
+        summoned->SetDisableGravity(true);
+        summoned->SetHover(true);
+        summoned->SetCanFly(true);
+    }
+    if (player)
+        summoned->AI()->AttackStart(player);
+    return summoned;
+}
+
+static Creature* SummonRescueHelper(Creature* meredy, uint32 entry, Position const& pos)
+{
+    Creature* helper = meredy->SummonCreature(entry, pos, TEMPSUMMON_TIMED_DESPAWN, 5min);
+    if (!helper)
+        return nullptr;
+
+    helper->SetFaction(FACTION_RESCUE_HELPER);
+    helper->SetReactState(REACT_AGGRESSIVE);
+    return helper;
+}
+
+static void SendRescueHelperToRoost(Creature* source, uint32 entry)
+{
+    if (Creature* helper = source->FindNearestCreature(entry, 150.0f))
+    {
+        helper->SetReactState(REACT_PASSIVE);
+        helper->CombatStop();
+        helper->GetMotionMaster()->MovePoint(POINT_RESCUE_ROOST_ENTRANCE, RescueRoostEntrancePos);
+        helper->DespawnOrUnsummon(45s);
+    }
+}
+
+// 153211 - Meredy Huntswell (ritual cage)
+// Wiki + sniff 17-00-16: gossip, two ambusher waves, Kee-La/Henry (conv 11738),
+// two more waves, conv 11739, Bloodbeak descends. Kill 153964 credits the quest.
+struct npc_meredy_huntswell_ritual : public ScriptedAI
+{
+    npc_meredy_huntswell_ritual(Creature* creature) : ScriptedAI(creature) { }
+
+    bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
+    {
+        if (menuId != GOSSIP_MENU_MEREDY_RITUAL || gossipListId != GOSSIP_OPTION_MEREDY_RITUAL)
+            return false;
+
+        if (player->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) != QUEST_STATUS_INCOMPLETE)
+            return false;
+
+        CloseGossipMenuFor(player);
+        me->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
+        Talk(SAY_MEREDY_BREAK_FREE, player);
+
+        _playerGuid = player->GetGUID();
+        SummonRescueHostile(me, player, NPC_HARPY_AMBUSHER, HarpyAmbusherSummonPosWest, true, FACTION_HOSTILE_NPE);
+        SummonRescueHostile(me, player, NPC_HARPY_AMBUSHER, HarpyAmbusherSummonPosEast, true, FACTION_HOSTILE_NPE);
+
+        _events.Reset();
+        _events.ScheduleEvent(EVENT_RESCUE_WAVE_2, 25s);
+        _events.ScheduleEvent(EVENT_RESCUE_SUMMON_KEELA, 37615ms);
+        _events.ScheduleEvent(EVENT_RESCUE_SUMMON_HENRY, 47521ms);
+        _events.ScheduleEvent(EVENT_RESCUE_WAVE_3, 50790ms);
+        _events.ScheduleEvent(EVENT_RESCUE_WAVE_4, 75306ms);
+        _events.ScheduleEvent(EVENT_RESCUE_CONVERSATION_BLOODBEAK, 92212ms);
+        _events.ScheduleEvent(EVENT_RESCUE_SUMMON_BLOODBEAK, 97457ms);
+        return true;
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        _events.Update(diff);
+
+        while (uint32 eventId = _events.ExecuteEvent())
+        {
+            Player* player = GetRescuePlayer(me, _playerGuid);
+            switch (eventId)
+            {
+                case EVENT_RESCUE_WAVE_2:
+                    SummonRescueHostile(me, player, NPC_HUNTING_WORG_RESCUE, HuntingWorgWave2Pos, false, FACTION_HOSTILE_NPE);
+                    SummonRescueHostile(me, player, NPC_HARPY_AMBUSHER, HarpyAmbusherWave2Pos, true, FACTION_HOSTILE_NPE);
+                    break;
+                case EVENT_RESCUE_SUMMON_KEELA:
+                    SummonRescueHelper(me, NPC_KEELA_RESCUE_HELPER, KeeLaRescueHelperPos);
+                    if (player)
+                        Conversation::CreateConversation(CONVERSATION_RESCUE_HELPERS, player, *player, player->GetGUID(), nullptr);
+                    break;
+                case EVENT_RESCUE_SUMMON_HENRY:
+                    SummonRescueHelper(me, NPC_HENRY_RESCUE_HELPER, HenryRescueHelperPos);
+                    break;
+                case EVENT_RESCUE_WAVE_3:
+                    for (Position const& pos : HuntingWorgWave3Pos)
+                        SummonRescueHostile(me, player, NPC_HUNTING_WORG_RESCUE, pos, false, FACTION_HOSTILE_NPE);
+                    break;
+                case EVENT_RESCUE_WAVE_4:
+                    SummonRescueHostile(me, player, NPC_HARPY_AMBUSHER, HarpyAmbusherWave4Pos, true, FACTION_HOSTILE_NPE);
+                    for (Position const& pos : HuntingWorgWave4Pos)
+                        SummonRescueHostile(me, player, NPC_HUNTING_WORG_RESCUE, pos, false, FACTION_HOSTILE_NPE);
+                    break;
+                case EVENT_RESCUE_CONVERSATION_BLOODBEAK:
+                    if (player)
+                        Conversation::CreateConversation(CONVERSATION_RESCUE_BLOODBEAK, player, *player, player->GetGUID(), nullptr);
+                    break;
+                case EVENT_RESCUE_SUMMON_BLOODBEAK:
+                    SummonRescueHostile(me, player, NPC_BLOODBEAK, BloodbeakDescendPos, true, FACTION_BLOODBEAK);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+private:
+    EventMap _events;
+    ObjectGuid _playerGuid;
+};
+
+// 153964 - Bloodbeak (summoned during Rescue of Meredy, not a world spawn)
+struct npc_bloodbeak_harpy_roost : public CombatAI
+{
+    npc_bloodbeak_harpy_roost(Creature* creature) : CombatAI(creature) { }
+
+    void JustAppeared() override
+    {
+        me->SetAnimTier(AnimTier::Hover);
+        me->SetDisableGravity(true);
+        me->SetHover(true);
+        me->SetCanFly(true);
+    }
+
+    void JustDied(Unit* killer) override
+    {
+        if (Creature* meredy = me->FindNearestCreature(NPC_MEREDY_HUNTSWELL_RITUAL, 150.0f))
+            meredy->AI()->Talk(SAY_MEREDY_LETS_GO);
+
+        SendRescueHelperToRoost(me, NPC_HENRY_RESCUE_HELPER);
+        SendRescueHelperToRoost(me, NPC_KEELA_RESCUE_HELPER);
+        CombatAI::JustDied(killer);
+    }
+};
+
+// 155197 - Henry Garrick (ritual helper)
+struct npc_henry_garrick_rescue_helper : public CombatAI
+{
+    npc_henry_garrick_rescue_helper(Creature* creature) : CombatAI(creature) { }
+
+    void JustAppeared() override
+    {
+        _healEvents.ScheduleEvent(EVENT_HENRY_HEAL, 10s);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        _healEvents.Update(diff);
+        if (_healEvents.ExecuteEvent() == EVENT_HENRY_HEAL)
+        {
+            if (Player* player = me->SelectNearestPlayer(40.0f))
+                DoCast(player, SPELL_HENRY_FLASH_HEAL);
+            _healEvents.ScheduleEvent(EVENT_HENRY_HEAL, 8s);
+        }
+        CombatAI::UpdateAI(diff);
+    }
+
+private:
+    EventMap _healEvents;
+};
+
+// 156929 - Ralia Dreamchaser (Hrun's Barrow)
+// Retail 12.1: personal hover spawn, InteractSpellID 312463, click plays scene 2379/2775.
+struct npc_ralia_dreamchaser_pit : public ScriptedAI
+{
+    npc_ralia_dreamchaser_pit(Creature* creature) : ScriptedAI(creature), _rideStarted(false) { }
+
+    void JustAppeared() override
+    {
+        Talk(0);
+        me->SetFloating(true);
+        me->SetHover(true);
+        me->SetNpcFlag(UNIT_NPC_FLAG_SPELLCLICK);
+        me->SetUninteractible(false);
+        me->SetImmuneToPC(true);
+    }
+
+    void OnSpellClick(Unit* clicker, bool spellClickHandled) override
+    {
+        Player* player = clicker->ToPlayer();
+        if (!player || _rideStarted)
+            return;
+
+        if (player->GetQuestStatus(QUEST_WHO_LURKS_IN_THE_PIT_ALLIANCE) != QUEST_STATUS_INCOMPLETE
+            && player->GetQuestStatus(QUEST_WHO_LURKS_IN_THE_PIT_HORDE) != QUEST_STATUS_INCOMPLETE)
+            return;
+
+        _rideStarted = true;
+
+        if (!spellClickHandled)
+            player->GetSceneMgr().PlayScene(SCENE_RALIA_ELK_RIDE);
+    }
+
+private:
+    bool _rideStarted;
+};
+
+enum DarkmaulCitadelChainData
+{
+    QUEST_MAGE_THE_BEST_WAY_TO_USE_SHEEP = 59354,
+    QUEST_RIGHT_BENEATH_THEIR_EYES       = 55981,
+    QUEST_RIGHT_BENEATH_THEIR_EYES_H     = 59978,
+    QUEST_CONTROLLING_THEIR_STONES_A     = 55990,
+    QUEST_CONTROLLING_THEIR_STONES_H     = 59981,
+    QUEST_DUNGEON_DARKMAUL_CITADEL       = 55992,
+    QUEST_SPEAK_TO_KALECGOS              = 55991,
+
+    NPC_MEREDY_HUNTSWELL_CAMP            = 156886,
+    NPC_ALLIANCE_MAGE_POLYMORPH_DUMMY    = 168372,
+    NPC_MEREDY_HUNTSWELL_OGRE            = 156943,
+    NPC_KALECGOS_EXILES_REACH            = 244389,
+    NPC_KALECGOS_DARKMAUL_LEAVE          = 156501,
+    NPC_KILL_CREDIT_POLYMORPH_PRACTICE   = 164974,
+    NPC_KILL_CREDIT_LEAVE_DARKMAUL       = 161350,
+
+    GOSSIP_MENU_MEREDY_POLYMORPH         = 25321,
+    GOSSIP_OPTION_MEREDY_POLYMORPH       = 0,
+    GOSSIP_MENU_MEREDY_OGRE              = 24550,
+    GOSSIP_OPTION_MEREDY_OGRE            = 0,
+    GOSSIP_MENU_KALECGOS_DRAGON_ISLES    = 39219,
+    GOSSIP_OPTION_KALECGOS_DRAGON_ISLES  = 0,
+    GOSSIP_MENU_KALECGOS_LEAVE_DARKMAUL  = 39497,
+    GOSSIP_OPTION_KALECGOS_LEAVE_DARKMAUL = 0,
+
+    QUEST_REPAIR_YOURSELF_ALLIANCE       = 85678,
+    QUEST_REPAIR_YOURSELF_HORDE          = 85679,
+
+    NPC_PRISONER_HENRY                   = 153565,
+    NPC_PRISONER_CAPTAIN_GARRICK         = 153566,
+    NPC_PRISONER_JAINA                   = 245399,
+    NPC_GORGROTH                         = 153580,
+    NPC_KELRA_CHAINED                    = 156954,
+    NPC_OGRE_RUNESTONE_STALKER           = 161306,
+    NPC_OGRE_RUNESTONE_KILL_CREDIT       = 161300,
+
+    SPELL_SUMMON_ALLIANCE_MAGE_DUMMY     = 321148,
+    SPELL_POLYMORPH                      = 118,
+    SPELL_OGRE_TRANSFORMATION_CHANNEL    = 313583,
+    SPELL_OGRE_TRANSFORMATION_AURA       = 298241,
+    SPELL_OGRE_TRANSFORMATION_MODEL      = 298232,
+    SPELL_PRISONER_CHAIN                 = 299155,
+    SPELL_DROP_OGRE_DISGUISE             = 298359,
+    SPELL_LEAVE_DARKMAUL_CITADEL         = 319030,
+    SPELL_OGRE_RUNESTONE_BEAM            = 314144,
+    SPELL_DISABLE_OGRE_RUNESTONE         = 314180,
+
+    AREATRIGGER_ENTER_DARKMAUL           = 16996,
+    AREATRIGGER_OGRE_COOKING             = 17000,
+    AREATRIGGER_CITADEL_ENTRANCE         = 16893,
+
+    CRITERIA_TREE_WAVE_GORGROTH          = 80050,
+    CRITERIA_TREE_DANCE_COOKING          = 80052,
+    CRITERIA_TREE_WAVE_GORGROTH_H        = 85146,
+    CRITERIA_TREE_DANCE_COOKING_H        = 85148,
+
+    SAY_MEREDY_OGRE_TINGLE               = 0
+};
+
+static bool IsOgreDisguiseQuestIncomplete(Player const* player)
+{
+    return player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES) == QUEST_STATUS_INCOMPLETE
+        || player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES_H) == QUEST_STATUS_INCOMPLETE;
+}
+
+static float OgrePrisonerFollowAngle(uint32 entry)
+{
+    switch (entry)
+    {
+        case NPC_PRISONER_JAINA:
+            return 2.6f;
+        case NPC_PRISONER_HENRY:
+            return 3.14f;
+        default:
+            return 3.7f;
+    }
+}
+
+static void DespawnOgrePrisoners(Player* player)
+{
+    for (uint32 entry : { NPC_PRISONER_CAPTAIN_GARRICK, NPC_PRISONER_JAINA, NPC_PRISONER_HENRY })
+        if (Creature* prisoner = player->FindNearestCreature(entry, 80.0f))
+            if (prisoner->GetOwnerGUID() == player->GetGUID() || prisoner->GetDemonCreatorGUID() == player->GetGUID())
+                prisoner->DespawnOrUnsummon();
+}
+
+// Sniff 19:24:07: credit 16893, spell 298359, then 298241/298232 drop. Core credits the AT
+// before script OnUnitEnter, so 55981 is already COMPLETE when the AI runs.
+static void DropOgreDisguise(Player* player)
+{
+    if (!player->HasAura(SPELL_OGRE_TRANSFORMATION_AURA) && !player->HasAura(SPELL_OGRE_TRANSFORMATION_MODEL))
+        return;
+
+    player->RemoveAurasDueToSpell(SPELL_OGRE_TRANSFORMATION_AURA);
+    player->RemoveAurasDueToSpell(SPELL_OGRE_TRANSFORMATION_MODEL);
+    player->CastSpell(player, SPELL_DROP_OGRE_DISGUISE, true);
+    player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT, true);
+    DespawnOgrePrisoners(player);
+}
+
+// 156886 - Meredy Huntswell (camp). Sniff 19:18:34 gossip 25321/51802, then spell 321148.
+struct npc_meredy_huntswell_camp : public ScriptedAI
+{
+    npc_meredy_huntswell_camp(Creature* creature) : ScriptedAI(creature) { }
+
+    bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
+    {
+        if (menuId != GOSSIP_MENU_MEREDY_POLYMORPH || gossipListId != GOSSIP_OPTION_MEREDY_POLYMORPH)
+            return false;
+
+        if (player->GetQuestStatus(QUEST_MAGE_THE_BEST_WAY_TO_USE_SHEEP) != QUEST_STATUS_INCOMPLETE)
+            return false;
+
+        CloseGossipMenuFor(player);
+        player->KilledMonsterCredit(NPC_MEREDY_HUNTSWELL_CAMP);
+        player->CastSpell(player, SPELL_SUMMON_ALLIANCE_MAGE_DUMMY, true);
+        player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT, true);
+        return true;
+    }
+};
+
+// 168372 - Alliance Mage dummy created by 321148. Sniff 19:20:36 / 19:21:03: Polymorph 118 credits 164974.
+struct npc_alliance_mage_polymorph_dummy : public ScriptedAI
+{
+    npc_alliance_mage_polymorph_dummy(Creature* creature) : ScriptedAI(creature) { }
+
+    void JustAppeared() override
+    {
+        // Sniffed FactionTemplate is 35, but 118 needs a hostile target on this core.
+        // Immune-to-NPC keeps camp allies from attacking the dummy.
+        me->SetFaction(FACTION_HOSTILE_NPE);
+        me->SetImmuneToNPC(true);
+        me->SetReactState(REACT_PASSIVE);
+    }
+
+    void SpellHit(WorldObject* caster, SpellInfo const* spellInfo) override
+    {
+        if (!spellInfo || spellInfo->Id != SPELL_POLYMORPH)
+            return;
+
+        Player* player = caster->ToPlayer();
+        if (!player)
+            return;
+
+        player->KilledMonsterCredit(NPC_KILL_CREDIT_POLYMORPH_PRACTICE);
+    }
+};
+
+// 156943 - Meredy Huntswell (ruins). Sniff 19:22:38 channel 313583, 19:22:44 aura 298241 + credit 156943.
+struct npc_meredy_huntswell_ogre : public ScriptedAI
+{
+    npc_meredy_huntswell_ogre(Creature* creature) : ScriptedAI(creature) { }
+
+    bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
+    {
+        if (menuId != GOSSIP_MENU_MEREDY_OGRE || gossipListId != GOSSIP_OPTION_MEREDY_OGRE)
+            return false;
+
+        if (!IsOgreDisguiseQuestIncomplete(player))
+            return false;
+
+        CloseGossipMenuFor(player);
+        Talk(SAY_MEREDY_OGRE_TINGLE, player);
+        me->CastSpell(player, SPELL_OGRE_TRANSFORMATION_CHANNEL);
+        player->CastSpell(player, SPELL_OGRE_TRANSFORMATION_AURA, true);
+        player->KilledMonsterCredit(me->GetEntry());
+        player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT, true);
+
+        // Sniff 19:22:44 CreateObject2: Jaina 245399, Henry 153565, Garrick 153566.
+        // Horde prisoner entries are not in the Alliance sniff; do not invent summons.
+        if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES) == QUEST_STATUS_INCOMPLETE)
+        {
+            player->SummonCreature(NPC_PRISONER_JAINA, Position(317.25522f, -2172.2432f, 106.14853f, 0.81894f), TEMPSUMMON_TIMED_DESPAWN, 30min);
+            player->SummonCreature(NPC_PRISONER_HENRY, Position(321.32812f, -2173.9878f, 106.42307f, 0.35142f), TEMPSUMMON_TIMED_DESPAWN, 30min);
+            player->SummonCreature(NPC_PRISONER_CAPTAIN_GARRICK, Position(323.2691f, -2174.8298f, 106.41644f, 0.56557f), TEMPSUMMON_TIMED_DESPAWN, 30min);
+        }
+        return true;
+    }
+};
+
+// 244389 - Kalecgos on Exile's Reach. Sniff 19:41:08 gossip 39219/133763 credits 244389.
+struct npc_kalecgos_exiles_reach : public ScriptedAI
+{
+    npc_kalecgos_exiles_reach(Creature* creature) : ScriptedAI(creature) { }
+
+    bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
+    {
+        if (menuId != GOSSIP_MENU_KALECGOS_DRAGON_ISLES || gossipListId != GOSSIP_OPTION_KALECGOS_DRAGON_ISLES)
+            return false;
+
+        if (player->GetQuestStatus(QUEST_SPEAK_TO_KALECGOS) != QUEST_STATUS_INCOMPLETE)
+            return false;
+
+        CloseGossipMenuFor(player);
+        player->KilledMonsterCredit(NPC_KALECGOS_EXILES_REACH);
+        return true;
+    }
+};
+
+// 156800 / 167213 - Repair Yourself 85678. 12.1 often skips CMSG_REPAIR_ITEM when gear is already 100%.
+struct npc_quartermaster_repair_exiles : public ScriptedAI
+{
+    npc_quartermaster_repair_exiles(Creature* creature) : ScriptedAI(creature) { }
+
+    bool OnGossipHello(Player* player) override
+    {
+        if (player->GetQuestStatus(QUEST_REPAIR_YOURSELF_ALLIANCE) == QUEST_STATUS_INCOMPLETE
+            || player->GetQuestStatus(QUEST_REPAIR_YOURSELF_HORDE) == QUEST_STATUS_INCOMPLETE)
+            player->KilledMonsterCredit(me->GetEntry());
+        return false;
+    }
+};
+
+// 153565 / 153566 / 245399 - chained prisoners during 55981 (sniff 19:22:44).
+// Chain visual is 299155 (prisoner -> player), not 321690. RunSpeed 8, ignoreTargetWalk.
+struct npc_ogre_disguise_prisoner : public ScriptedAI
+{
+    npc_ogre_disguise_prisoner(Creature* creature) : ScriptedAI(creature) { }
+
+    void IsSummonedBy(WorldObject* summoner) override
+    {
+        me->SetReactState(REACT_PASSIVE);
+        me->SetImmuneToPC(true);
+        me->SetImmuneToNPC(true);
+        me->SetUninteractible(true);
+        me->SetWalk(false);
+        if (Unit* owner = summoner->ToUnit())
+        {
+            me->CastSpell(owner, SPELL_PRISONER_CHAIN, true);
+            me->GetMotionMaster()->MoveFollow(owner, 3.0f, OgrePrisonerFollowAngle(me->GetEntry()), {}, true);
+        }
+    }
+};
+
+// 161306 - Invisible Stalker at each Ogre Runestone (sniff 19:24:05).
+// Channels 314144 at chained Kelra 156954 (beam visual). Stops when 314180 hits the rune.
+struct npc_ogre_runestone_stalker : public ScriptedAI
+{
+    npc_ogre_runestone_stalker(Creature* creature) : ScriptedAI(creature) { }
+
+    void JustAppeared() override
+    {
+        me->SetReactState(REACT_PASSIVE);
+        me->SetImmuneToPC(true);
+        me->SetImmuneToNPC(true);
+        me->SetDisableGravity(true);
+
+        _scheduler.Schedule(500ms, [this](TaskContext ctx)
+        {
+            Creature* kelra = me->FindNearestCreature(NPC_KELRA_CHAINED, 30.0f);
+            if (!kelra)
+            {
+                ctx.Repeat(1s);
+                return;
+            }
+
+            if (me->GetCurrentSpell(CURRENT_CHANNELED_SPELL) || kelra->HasAura(SPELL_OGRE_RUNESTONE_BEAM, me->GetGUID()))
+                return;
+
+            CastSpellExtraArgs args(TRIGGERED_IGNORE_CAST_IN_PROGRESS | TRIGGERED_DONT_REPORT_CAST_ERROR | TRIGGERED_IGNORE_TARGET_CHECK);
+            me->CastSpell(kelra, SPELL_OGRE_RUNESTONE_BEAM, args);
+            ctx.Repeat(2s);
+        });
+    }
+
+    void DoAction(int32 action) override
+    {
+        if (action != 1)
+            return;
+
+        me->InterruptNonMeleeSpells(false);
+        _scheduler.CancelAll();
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        _scheduler.Update(diff);
+    }
+
+private:
+    TaskScheduler _scheduler;
+};
+
+// 314180 - disable Ogre Runestone 339865 (sniff SPELL_GO 19:31:47, effect OPEN_LOCK).
+class spell_disable_ogre_runestone : public SpellScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_OGRE_RUNESTONE_BEAM });
+    }
+
+    void HandleOpenLock(SpellEffIndex /*effIndex*/) const
+    {
+        if (Player* player = GetCaster() ? GetCaster()->ToPlayer() : nullptr)
+            player->KilledMonsterCredit(NPC_OGRE_RUNESTONE_KILL_CREDIT);
+
+        WorldObject* rune = GetHitGObj();
+        if (!rune)
+            rune = GetExplTargetGObj();
+        if (!rune)
+            return;
+
+        if (Creature* stalker = rune->FindNearestCreature(NPC_OGRE_RUNESTONE_STALKER, 8.0f))
+            stalker->AI()->DoAction(1);
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_disable_ogre_runestone::HandleOpenLock, EFFECT_0, SPELL_EFFECT_OPEN_LOCK);
+    }
+};
+
+// 55990 / 59981 - hidden 161300 (flags 24) sits between the 3 ward stones and sequenced runes.
+// Sniff never sends ADD_CREDIT for it (HIDE_CREDIT_MSG). Completing it when each stone is recovered
+// unlocks "Disable runes" in the tracker after Jugnug/Wug/Grunk.
+class quest_controlling_their_stones : public QuestScript
+{
+public:
+    quest_controlling_their_stones() : QuestScript("quest_controlling_their_stones") { }
+
+    void OnQuestObjectiveChange(Player* player, Quest const* /*quest*/, QuestObjective const& objective, int32 oldAmount, int32 newAmount) override
+    {
+        if (objective.Type != QUEST_OBJECTIVE_ITEM)
+            return;
+        if (oldAmount >= objective.Amount || newAmount < objective.Amount)
+            return;
+
+        player->KilledMonsterCredit(NPC_OGRE_RUNESTONE_KILL_CREDIT);
+    }
+
+    void OnQuestStatusChange(Player* player, Quest const* /*quest*/, QuestStatus /*oldStatus*/, QuestStatus newStatus) override
+    {
+        if (newStatus == QUEST_STATUS_COMPLETE || newStatus == QUEST_STATUS_REWARDED)
+            player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT, true);
+    }
+};
+
+// 16996 / 17000 / 16893 - Right Beneath Their Eyes enter credits (sniff type 19).
+struct at_darkmaul_quest_objective : AreaTriggerAI
+{
+    at_darkmaul_quest_objective(AreaTrigger* areatrigger) : AreaTriggerAI(areatrigger) { }
+
+    void OnUnitEnter(Unit* unit) override
+    {
+        Player* player = unit->ToPlayer();
+        if (!player)
+            return;
+
+        if (IsOgreDisguiseQuestIncomplete(player))
+            player->UpdateQuestObjectiveProgress(QUEST_OBJECTIVE_AREA_TRIGGER_ENTER, int32(at->GetEntry()), 1);
+
+        if (at->GetEntry() == AREATRIGGER_CITADEL_ENTRANCE)
+            DropOgreDisguise(player);
+    }
+};
+
+class player_exiles_reach_darkmaul_emotes : public PlayerScript
+{
+public:
+    player_exiles_reach_darkmaul_emotes() : PlayerScript("player_exiles_reach_darkmaul_emotes") { }
+
+    void OnLogin(Player* player, bool /*firstLogin*/) override
+    {
+        if (!IsOgreDisguiseQuestIncomplete(player))
+            DropOgreDisguise(player);
+    }
+
+    void OnQuestStatusChange(Player* player, uint32 questId) override
+    {
+        if (questId != QUEST_RIGHT_BENEATH_THEIR_EYES && questId != QUEST_RIGHT_BENEATH_THEIR_EYES_H)
+            return;
+
+        if (!IsOgreDisguiseQuestIncomplete(player))
+            DropOgreDisguise(player);
+    }
+
+    void OnTextEmote(Player* player, uint32 textEmote, uint32 /*emoteNum*/, ObjectGuid guid) override
+    {
+        if (!IsOgreDisguiseQuestIncomplete(player))
+            return;
+
+        if (textEmote == TEXT_EMOTE_WAVE)
+        {
+            if (guid.GetEntry() != NPC_GORGROTH)
+                return;
+            if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES) == QUEST_STATUS_INCOMPLETE)
+                player->UpdateQuestObjectiveProgress(QUEST_OBJECTIVE_CRITERIA_TREE, CRITERIA_TREE_WAVE_GORGROTH, 1);
+            if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES_H) == QUEST_STATUS_INCOMPLETE)
+                player->UpdateQuestObjectiveProgress(QUEST_OBJECTIVE_CRITERIA_TREE, CRITERIA_TREE_WAVE_GORGROTH_H, 1);
+        }
+        else if (textEmote == TEXT_EMOTE_DANCE)
+        {
+            if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES) == QUEST_STATUS_INCOMPLETE)
+                player->UpdateQuestObjectiveProgress(QUEST_OBJECTIVE_CRITERIA_TREE, CRITERIA_TREE_DANCE_COOKING, 1);
+            if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES_H) == QUEST_STATUS_INCOMPLETE)
+                player->UpdateQuestObjectiveProgress(QUEST_OBJECTIVE_CRITERIA_TREE, CRITERIA_TREE_DANCE_COOKING_H, 1);
+        }
+    }
+};
+
 void AddSC_zone_exiles_reach()
 {
     // Ship
@@ -7224,7 +7937,7 @@ void AddSC_zone_exiles_reach()
     RegisterSpellScript(spell_summon_guardian_q56034_q59941);
     RegisterSpellAndAuraScriptPair(spell_re_sizing_q56034, spell_re_sizing_aura_q56034);
     RegisterSpellScript(spell_resizer_hit_one_two_q56034_q59941);
-    RegisterSpellScript(spell_resizer_hit_three_q56034);
+    RegisterSpellAndAuraScriptPair(spell_resizer_hit_three_q56034, spell_resizer_hit_three_aura_q56034);
     RegisterSpellScript(spell_re_sizing_q59941);
     RegisterSpellScript(spell_re_sizing_aura_q59941);
     RegisterSpellScript(spell_re_sizer_slaughter);
@@ -7249,4 +7962,21 @@ void AddSC_zone_exiles_reach()
     new FactoryCreatureScript<CreatureAI, &LanaRuinsSelector>("npc_lana_jordan_q59948");
     new FactoryCreatureScript<CreatureAI, &AlariaRuinsSelector>("npc_alaria_q55965");
     new FactoryCreatureScript<CreatureAI, &WansaRuinsSelector>("npc_wonsa_q59948");
+    RegisterCreatureAI(npc_ralia_dreamchaser_pit);
+    // Harpy roost: Rescue of Meredy
+    RegisterCreatureAI(npc_meredy_huntswell_ritual);
+    RegisterCreatureAI(npc_bloodbeak_harpy_roost);
+    RegisterCreatureAI(npc_henry_garrick_rescue_helper);
+    // Darkmaul citadel chain (sniff 19-16-21)
+    RegisterCreatureAI(npc_meredy_huntswell_camp);
+    RegisterCreatureAI(npc_alliance_mage_polymorph_dummy);
+    RegisterCreatureAI(npc_meredy_huntswell_ogre);
+    RegisterCreatureAI(npc_kalecgos_exiles_reach);
+    RegisterCreatureAI(npc_quartermaster_repair_exiles);
+    RegisterCreatureAI(npc_ogre_disguise_prisoner);
+    RegisterCreatureAI(npc_ogre_runestone_stalker);
+    RegisterSpellScript(spell_disable_ogre_runestone);
+    new quest_controlling_their_stones();
+    RegisterAreaTriggerAI(at_darkmaul_quest_objective);
+    new player_exiles_reach_darkmaul_emotes();
 }

@@ -461,4 +461,15 @@ void WorldSession::HandleRepairItemOpcode(WorldPackets::Item::RepairItem& packet
         TC_LOG_DEBUG("network", "ITEM: Repair all items at {}", packet.NpcGUID.ToString());
         _player->DurabilityRepairAll(true, discountMod, packet.UseGuildBank);
     }
+
+    // Exile's Reach 85678 / 85679: sniff completes the objective with CMSG_REPAIR_ITEM.
+    switch (unit->GetEntry())
+    {
+        case 156800: // Quartermaster Richter
+        case 167213: // Provisioner Jin'hake
+            _player->KilledMonsterCredit(unit->GetEntry());
+            break;
+        default:
+            break;
+    }
 }

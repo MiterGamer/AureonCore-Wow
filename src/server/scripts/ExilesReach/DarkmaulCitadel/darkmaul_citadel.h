@@ -31,7 +31,8 @@ enum DarkmaulCitadelDataTypes
     DATA_TUNK     = 0,
     DATA_RAVNYR   = 1,
 
-    DATA_GORGROTH
+    DATA_GORGROTH,
+    DATA_SHADOWY_DOOR
 };
 
 enum DarkmaulCitadelCreatureIds
@@ -39,7 +40,20 @@ enum DarkmaulCitadelCreatureIds
     // Bosses
     BOSS_TUNK     = 157300,
     BOSS_GORGROTH = 156814,
-    BOSS_RAVNYR   = 156501
+    BOSS_RAVNYR   = 156501,
+
+    NPC_DARKMAUL_SHADOWCALLER        = 156821,
+    NPC_DECAYING_CORPSE              = 156913,
+    NPC_RITUAL_INVIS_BUNNY           = 165198,
+    NPC_CAPTAIN_GARRICK_DARKMAUL     = 161350,
+    NPC_HENRY_GARRICK_DARKMAUL       = 161504,
+    NPC_JAINA_PROUDMOORE_DARKMAUL    = 245401
+};
+
+enum DarkmaulCitadelActions
+{
+    ACTION_GORGROTH_SACRIFICED = 1,
+    ACTION_RITUAL_RESET        = 2
 };
 
 enum DarkmaulCitadelGameObjectIds

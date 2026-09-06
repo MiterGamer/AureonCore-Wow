@@ -14525,7 +14525,11 @@ bool Player::CanSeeStartQuest(Quest const* quest) const
         SatisfyQuestDay(quest, false) && SatisfyQuestWeek(quest, false) &&
         SatisfyQuestMonth(quest, false) && SatisfyQuestSeasonal(quest, false) && SatisfyQuestExpansion(quest, false))
     {
-        return int32(GetLevel() + sWorld->getIntConfig(CONFIG_QUEST_HIGH_LEVEL_HIDE_DIFF)) >= GetQuestMinLevel(quest);
+        int32 const highDiff = sWorld->getIntConfig(CONFIG_QUEST_HIGH_LEVEL_HIDE_DIFF);
+        if (highDiff < 0)
+            return true;
+
+        return int32(GetLevel() + highDiff) >= GetQuestMinLevel(quest);
     }
 
     return false;
@@ -14957,8 +14961,15 @@ void Player::CompleteQuest(uint32 quest_id)
             SetQuestSlotState(questStatus->Slot, QUEST_STATE_COMPLETE);
 
         if (Quest const* qInfo = sObjectMgr->GetQuestTemplate(quest_id))
+        {
             if (qInfo->HasFlag(QUEST_FLAGS_TRACKING_EVENT))
                 RewardQuest(qInfo, LootItemType::Item, 0, this, false);
+
+            // Flag is stored on the quest (e.g. 55990). Apply it on complete, not only on
+            // reward, so phased turn-in NPCs (Captain Kelra 156965, phase 13843) appear.
+            if (qInfo->HasFlag(QUEST_FLAGS_UPDATE_PHASESHIFT) && PhasingHandler::OnConditionChange(this, false))
+                UpdateObjectVisibility();
+        }
     }
 
     if (sWorld->getBoolConfig(CONFIG_QUEST_ENABLE_QUEST_TRACKER)) // check if Quest Tracker is enabled
@@ -16188,6 +16199,19 @@ QuestGiverStatus Player::GetQuestDialogStatus(Object const* questgiver) const
 
     QuestGiverStatus result = QuestGiverStatus::None;
 
+    auto isQuestTrivial = [this](Quest const* quest) -> bool
+    {
+        int32 const hideDiff = sWorld->getIntConfig(CONFIG_QUEST_LOW_LEVEL_HIDE_DIFF);
+        if (hideDiff < 0)
+            return false;
+
+        int32 const questLevel = GetQuestLevel(quest);
+        if (questLevel <= 0)
+            return false;
+
+        return GetLevel() > (questLevel + hideDiff);
+    };
+
     for (uint32 questId : qir)
     {
         Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
@@ -16234,7 +16258,7 @@ QuestGiverStatus Player::GetQuestDialogStatus(Object const* questgiver) const
 
         if (quest->IsTurnIn() && CanTakeQuest(quest, false))
         {
-            bool isTrivial = GetLevel() > (GetQuestLevel(quest) + sWorld->getIntConfig(CONFIG_QUEST_LOW_LEVEL_HIDE_DIFF));
+            bool const isTrivial = isQuestTrivial(quest);
             if (quest->IsRepeatable())
                 result |= isTrivial ? QuestGiverStatus::TrivialRepeatableTurnin : QuestGiverStatus::RepeatableTurnin;
             else
@@ -16257,7 +16281,7 @@ QuestGiverStatus Player::GetQuestDialogStatus(Object const* questgiver) const
             {
                 if (SatisfyQuestLevel(quest, false))
                 {
-                    bool isTrivial = GetLevel() > (GetQuestLevel(quest) + sWorld->getIntConfig(CONFIG_QUEST_LOW_LEVEL_HIDE_DIFF));
+                    bool const isTrivial = isQuestTrivial(quest);
                     if (quest->IsImportant())
                         result |= isTrivial ? QuestGiverStatus::TrivialImportantQuest : QuestGiverStatus::ImportantQuest;
                     else if (quest->IsMeta())
@@ -17189,7 +17213,8 @@ bool Player::IsQuestObjectiveCompletable(uint16 slot, Quest const* quest, QuestO
         }
 
         if (objectiveSequenceSatisfied)
-            objectiveSequenceSatisfied = IsQuestObjectiveComplete(slot, quest, previousObjective) || (previousObjective.Flags & (QUEST_OBJECTIVE_FLAG_OPTIONAL | QUEST_OBJECTIVE_FLAG_PART_OF_PROGRESS_BAR));
+            objectiveSequenceSatisfied = IsQuestObjectiveComplete(slot, quest, previousObjective)
+                || (previousObjective.Flags & (QUEST_OBJECTIVE_FLAG_OPTIONAL | QUEST_OBJECTIVE_FLAG_PART_OF_PROGRESS_BAR | QUEST_OBJECTIVE_FLAG_HIDDEN));
 
         --previousIndex;
     } while (previousIndex >= 0);

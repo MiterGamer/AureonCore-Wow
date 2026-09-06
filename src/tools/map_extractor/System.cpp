@@ -117,6 +117,9 @@ char const* CONF_Product = "wow";
 char const* CONF_Region = "eu";
 bool CONF_UseRemoteCasc = false;
 
+// Empty = extract every map from Map.db2
+std::set<uint32> CONF_mapIds;
+
 #define CASC_LOCALES_COUNT 17
 
 char const* CascLocaleNames[CASC_LOCALES_COUNT] =
@@ -172,6 +175,7 @@ void Usage(char const* prg)
         "-p which installed product to open (wow/wowt/wow_beta)\n"\
         "-c use remote casc\n"\
         "-r set remote casc region - standard: eu\n"\
+        "-m extract only the given map id (repeatable, e.g. -m 2175)\n"\
         "Example: %s -f 0 -i \"c:\\games\\game\"\n", prg, prg);
     exit(1);
 }
@@ -247,6 +251,20 @@ void HandleArgs(int argc, char* arg[])
             case 'r':
                 if (c + 1 < argc && strlen(arg[c + 1]))      // all ok
                     CONF_Region = arg[c++ + 1];
+                else
+                    Usage(arg[0]);
+                break;
+            case 'm':
+                if (c + 1 < argc && strlen(arg[c + 1]))
+                {
+                    char* ids = arg[++c];
+                    char* token = strtok(ids, ",");
+                    while (token)
+                    {
+                        CONF_mapIds.insert(uint32(atoi(token)));
+                        token = strtok(nullptr, ",");
+                    }
+                }
                 else
                     Usage(arg[0]);
                 break;
@@ -1077,6 +1095,14 @@ bool IsDeepWaterIgnored(uint32 mapId, uint32 x, uint32 y)
         return x == 43 && (y == 39 || y == 40);
     }
 
+    if (mapId == 2175)
+    {
+        // Exile's Reach. Coastal ADTs are flagged Deep (fatigue) even around Murloc
+        // Hideaway. mmapgen discards DarkWater tiles entirely, so those grids never
+        // get a navmesh and NPCs fall through to the ocean floor (~Z -583).
+        return true;
+    }
+
     return false;
 }
 
@@ -1097,6 +1123,9 @@ void ExtractMaps(uint32 build)
     printf("Convert map files\n");
     for (std::size_t z = 0; z < map_ids.size(); ++z)
     {
+        if (!CONF_mapIds.empty() && !CONF_mapIds.contains(map_ids[z].Id))
+            continue;
+
         printf("Extract %s (" SZFMTD "/" SZFMTD ")                  \n", map_ids[z].Name.c_str(), z + 1, map_ids.size());
         // Loadup map grid data
         ChunkedFile wdt;

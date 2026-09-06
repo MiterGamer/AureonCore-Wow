@@ -495,13 +495,18 @@ class spell_lord_stormsong_disciple_of_the_vol_zith : public AuraScript
 {
     bool Validate(SpellInfo const* spellInfo) override
     {
-        return ValidateSpellInfo({ static_cast<uint32>(spellInfo->GetEffect(EFFECT_0).CalcValueAsInt()) });
+        // EFFECT_0 BasePoints is the triggered spell; CalcValue is 0 at script-load.
+        return ValidateSpellEffect({ { spellInfo->Id, EFFECT_0 } });
     }
 
     void HandlePeriodic(AuraEffect const* /*aurEff*/) const
     {
+        int32 const spellId = GetEffectInfo(EFFECT_0).CalcValueAsInt();
+        if (spellId <= 0)
+            return;
+
         Unit* target = GetTarget();
-        target->CastSpell(target, GetEffectInfo(EFFECT_0).CalcValueAsInt(), TRIGGERED_IGNORE_CAST_IN_PROGRESS | TRIGGERED_DONT_REPORT_CAST_ERROR);
+        target->CastSpell(target, uint32(spellId), TRIGGERED_IGNORE_CAST_IN_PROGRESS | TRIGGERED_DONT_REPORT_CAST_ERROR);
     }
 
     void Register() override
