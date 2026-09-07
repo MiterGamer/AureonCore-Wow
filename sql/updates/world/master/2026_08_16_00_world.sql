@@ -32,7 +32,7 @@ INSERT INTO `gameobject` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnDifficu
 (@OGUID+1, 293684, 1, 1637, 5170, '0', '0', 0, 1842.263916015625, -4389.0224609375, 135.2330169677734375, 0.286221921443939208, 0, 0, 0.142622947692871093, 0.989777088165283203, 120, 255, 1, 68974); -- Portal to Undercity (Area: Valley of Strength - Difficulty: 0) CreateObject1
 
 -- Gossip
-UPDATE `creature_template_gossip` SET `MenuID`=22952, `VerifiedBuild`=68974 WHERE  `CreatureID`=9564 AND `MenuID`=1969; -- Frezza
+UPDATE IGNORE `creature_template_gossip` SET `MenuID`=22952, `VerifiedBuild`=68974 WHERE  `CreatureID`=9564 AND `MenuID`=1969; -- Frezza
 
 DELETE FROM `gossip_menu` WHERE `MenuID`=22952 AND `TextID`=35513;
 INSERT INTO `gossip_menu` (`MenuID`, `TextID`, `VerifiedBuild`) VALUES

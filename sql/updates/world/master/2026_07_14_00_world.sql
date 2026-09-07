@@ -39,7 +39,7 @@ INSERT INTO `conditions` (`SourceTypeOrReferenceId`,`SourceGroup`,`SourceEntry`,
 
 UPDATE `creature_template_addon` SET `PvpFlags`=0 WHERE `entry`=24363;
 UPDATE `creature_template_difficulty` SET `LevelScalingDeltaMin`=2,`LevelScalingDeltaMax`=2,`ContentTuningID`=1112,`DamageModifier`=35,`LootID`=24239,`GoldMin`=419816,`GoldMax`=513109,`StaticFlags1`=524288 WHERE `Entry`=24239 AND `DifficultyID`=2;
-UPDATE `creature` SET `guid`=89357 WHERE `guid`=313406;
+UPDATE `creature` SET `spawntimesecs`=43200 WHERE `guid`=313406;
 
 UPDATE `creature_template` SET `ScriptName`='npc_malacrass_blood_worm' WHERE `entry`=52827;
 UPDATE `creature_template_difficulty` SET `ContentTuningID`=1112, `VerifiedBuild`=68453 WHERE `Entry`=52827 AND `DifficultyID`=2; -- 52827 (Blood Worm)

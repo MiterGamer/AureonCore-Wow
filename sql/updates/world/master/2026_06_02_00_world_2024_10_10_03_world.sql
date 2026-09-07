@@ -4,8 +4,8 @@ DELETE FROM `waypoint_path` WHERE `PathId`=28998480;
 
 SET @GUID=51836;
 SET @PATH=4146880;
-UPDATE `creature` SET `guid`=@GUID,`position_x`=-6630.2847,`position_y`=945.4344,`position_z`=-53.113213,`orientation`=1.90135,`spawntimesecs`=43200,`wander_distance`=0,`MovementType`=2 WHERE `guid`=362481;
-UPDATE `creature_addon` SET `guid`=@GUID,`PathId`=@PATH WHERE `guid`=362481;
+UPDATE `creature` SET `position_x`=-6630.2847,`position_y`=945.4344,`position_z`=-53.113213,`orientation`=1.90135,`spawntimesecs`=43200,`wander_distance`=0,`MovementType`=2 WHERE `guid`=362481;
+UPDATE `creature_addon` SET `PathId`=@PATH WHERE `guid`=362481;
 
 DELETE FROM `waypoint_path` WHERE `PathId`= @PATH;
 INSERT INTO `waypoint_path` (`PathId`, `MoveType`, `Flags`, `Velocity`, `Comment`) VALUES

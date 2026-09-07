@@ -1,7 +1,7 @@
 -- "Mist" more blizzlike script
 
 -- Mist respawn time, time is from classic server
-UPDATE `creature` SET `guid`=49625, `spawntimesecs`=30 WHERE `guid`=311282;
+UPDATE `creature` SET `spawntimesecs`=30 WHERE `guid`=311282;
 
 -- Mist Waypoints
 DELETE FROM `waypoint_path` WHERE `PathId`=28545;

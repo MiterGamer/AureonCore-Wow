@@ -1,4 +1,19 @@
 --
+CREATE TABLE IF NOT EXISTS `spell_scripts` (
+  `id` int unsigned NOT NULL DEFAULT '0',
+  `effIndex` tinyint unsigned NOT NULL DEFAULT '0',
+  `delay` int unsigned NOT NULL DEFAULT '0',
+  `command` int unsigned NOT NULL DEFAULT '0',
+  `datalong` int unsigned NOT NULL DEFAULT '0',
+  `datalong2` int unsigned NOT NULL DEFAULT '0',
+  `dataint` int NOT NULL DEFAULT '0',
+  `x` float NOT NULL DEFAULT '0',
+  `y` float NOT NULL DEFAULT '0',
+  `z` float NOT NULL DEFAULT '0',
+  `o` float NOT NULL DEFAULT '0',
+  `Comment` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT ''
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 UPDATE `creature_template` SET `unit_flags` = 768 WHERE `entry` = 38374;
 UPDATE `creature_template_addon` SET `SheathState` = 1 WHERE `entry` = 38374;
 

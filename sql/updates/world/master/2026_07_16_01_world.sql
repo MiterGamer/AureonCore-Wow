@@ -23,7 +23,7 @@ UPDATE `creature_template` SET `ScriptName` = 'npc_soaring_eagle' WHERE `entry` 
 UPDATE `creature_template_difficulty` SET `ContentTuningID`=1112, `StaticFlags1`=0x20080000, `VerifiedBuild`=68887 WHERE `Entry`=24858 AND `DifficultyID`=2;
 
 DELETE FROM `creature` WHERE `id`=24858 AND `map`=568;
-INSERT INTO `creature` (`guid`,`id`,`map`,`zoneId`,`areaId`,`spawnDifficulties`,`phaseId`,`modelid`,`equipment_id`,`position_x`,`position_y`,`position_z`,`orientation`,`spawntimesecs`,`wander_distance`,`currentwaypoint`,`MovementType`,`ScriptName`,`StringId`,`VerifiedBuild`) VALUES
+INSERT IGNORE INTO `creature` (`guid`,`id`,`map`,`zoneId`,`areaId`,`spawnDifficulties`,`phaseId`,`modelid`,`equipment_id`,`position_x`,`position_y`,`position_z`,`orientation`,`spawntimesecs`,`wander_distance`,`currentwaypoint`,`MovementType`,`ScriptName`,`StringId`,`VerifiedBuild`) VALUES
 (@CGUID+0,24858,568,0,0,'1,2',0,0,0,355.33228,1410.8638,91.63957,5.856256484985351562,259200,0,0,2,'',NULL,0),
 (@CGUID+1,24858,568,0,0,'1,2',0,0,0,356.3942,1419.819,91.724396,4.567828655242919921,259200,0,0,0,'',NULL,0),
 (@CGUID+2,24858,568,0,0,'1,2',0,0,0,369.08588,1378.0735,91.788025,0.423484355211257934,259200,0,0,2,'',NULL,0),

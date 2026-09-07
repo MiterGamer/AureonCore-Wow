@@ -24,7 +24,7 @@ UPDATE `creature_template_addon` SET `PvpFlags`=0 WHERE `entry` IN (24312,23817)
 UPDATE `creature_model_info` SET `BoundingRadius`=0.167448967695236206, `CombatReach`=0.837244868278503417, `VerifiedBuild`=68453 WHERE `DisplayID`=37574;
 
 DELETE FROM `creature` WHERE `id`=23817;
-INSERT INTO `creature` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnDifficulties`, `phaseId`, `modelid`, `equipment_id`, `position_x`, `position_y`, `position_z`, `orientation`, `spawntimesecs`, `wander_distance`, `currentwaypoint`, `MovementType`, `ScriptName`, `StringId`, `VerifiedBuild`) VALUES
+INSERT IGNORE INTO `creature` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnDifficulties`, `phaseId`, `modelid`, `equipment_id`, `position_x`, `position_y`, `position_z`, `orientation`, `spawntimesecs`, `wander_distance`, `currentwaypoint`, `MovementType`, `ScriptName`, `StringId`, `VerifiedBuild`) VALUES
 (89226, 23817, 568, 0, 0, '2', 0, 0, 0, -38.8813, 1084.2, 18.7948, 0.575959, 7200, 0, 0, 0, '', 'JanalaiEggsR', 0),
 (89227, 23817, 568, 0, 0, '2', 0, 0, 0, -40.7069, 1088.51, 18.7948, 0.017453, 7200, 0, 0, 0, '', 'JanalaiEggsR', 0),
 (89228, 23817, 568, 0, 0, '2', 0, 0, 0, -38.9577, 1207.25, 18.7947, 4.06662, 7200, 0, 0, 0, '', 'JanalaiEggsL', 0),

@@ -56,6 +56,7 @@ enum RavnyrTexts
 enum RavnyrMisc
 {
     QUEST_DUNGEON_DARKMAUL_CITADEL        = 55992,
+    QUEST_DUNGEON_DARKMAUL_CITADEL_HORDE  = 59984,
     NPC_KILL_CREDIT_LEAVE_DARKMAUL        = 161350,
     GOSSIP_MENU_KALECGOS_LEAVE_DARKMAUL   = 39497,
     GOSSIP_OPTION_KALECGOS_LEAVE_DARKMAUL = 0,
@@ -187,7 +188,8 @@ struct boss_ravnyr : public ScriptedAI
         if (menuId != GOSSIP_MENU_KALECGOS_LEAVE_DARKMAUL || gossipListId != GOSSIP_OPTION_KALECGOS_LEAVE_DARKMAUL)
             return false;
 
-        if (player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL) != QUEST_STATUS_INCOMPLETE)
+        if (player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL) != QUEST_STATUS_INCOMPLETE
+            && player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL_HORDE) != QUEST_STATUS_INCOMPLETE)
             return false;
 
         player->KilledMonsterCredit(NPC_KILL_CREDIT_LEAVE_DARKMAUL);

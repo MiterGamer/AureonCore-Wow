@@ -1,6 +1,6 @@
 -- Library Guardian (29724)
 DELETE FROM `creature` WHERE `id`=29724 AND `guid` IN (83139,83140,83141,83142,83143);
-INSERT INTO `creature` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnDifficulties`, `phaseId`, `modelid`, `equipment_id`, `position_x`, `position_y`, `position_z`, `orientation`, `spawntimesecs`, `wander_distance`, `currentwaypoint`, `curHealthPct`, `MovementType`, `ScriptName`, `VerifiedBuild`) VALUES
+INSERT IGNORE INTO `creature` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnDifficulties`, `phaseId`, `modelid`, `equipment_id`, `position_x`, `position_y`, `position_z`, `orientation`, `spawntimesecs`, `wander_distance`, `currentwaypoint`, `curHealthPct`, `MovementType`, `ScriptName`, `VerifiedBuild`) VALUES
 (83139, 29724, 571, 0, 0, '0', 0, 26475, 1, 8058.83, -854.984, 971.823, 0.628318011760711669, 300, 0, 0, 100, 0, '', 0),
 (83140, 29724, 571, 0, 0, '0', 0, 26475, 1, 8064.08, -831.682, 971.823, 5.427969932556152343, 300, 0, 0, 100, 0, '', 0),
 (83141, 29724, 571, 0, 0, '0', 0, 26475, 1, 8110.12, -871.216, 957.133, 6.126110076904296875, 300, 0, 0, 100, 0, '', 0),

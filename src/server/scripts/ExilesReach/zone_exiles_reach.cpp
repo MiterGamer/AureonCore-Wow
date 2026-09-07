@@ -24,10 +24,12 @@
 #include "Conversation.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
+#include "LootItemType.h"
 #include "Map.h"
 #include "MapUtils.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
+#include "ObjectMgr.h"
 #include "PassiveAI.h"
 #include "PhasingHandler.h"
 #include "Player.h"
@@ -7365,6 +7367,10 @@ struct npc_bloodbeak_harpy_roost : public CombatAI
         if (Creature* meredy = me->FindNearestCreature(NPC_MEREDY_HUNTSWELL_RITUAL, 150.0f))
             meredy->AI()->Talk(SAY_MEREDY_LETS_GO);
 
+        if (Player* player = me->SelectNearestPlayer(150.0f))
+            if (player->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) == QUEST_STATUS_INCOMPLETE)
+                player->KilledMonsterCredit(NPC_BLOODBEAK);
+
         SendRescueHelperToRoost(me, NPC_HENRY_RESCUE_HELPER);
         SendRescueHelperToRoost(me, NPC_KEELA_RESCUE_HELPER);
         CombatAI::JustDied(killer);
@@ -7441,7 +7447,9 @@ enum DarkmaulCitadelChainData
     QUEST_CONTROLLING_THEIR_STONES_A     = 55990,
     QUEST_CONTROLLING_THEIR_STONES_H     = 59981,
     QUEST_DUNGEON_DARKMAUL_CITADEL       = 55992,
+    QUEST_DUNGEON_DARKMAUL_CITADEL_HORDE = 59984,
     QUEST_SPEAK_TO_KALECGOS              = 55991,
+    QUEST_SPEAK_TO_KALECGOS_HORDE        = 59985,
 
     NPC_MEREDY_HUNTSWELL_CAMP            = 156886,
     NPC_ALLIANCE_MAGE_POLYMORPH_DUMMY    = 168372,
@@ -7615,7 +7623,23 @@ struct npc_meredy_huntswell_ogre : public ScriptedAI
     }
 };
 
-// 244389 - Kalecgos on Exile's Reach. Sniff 19:41:08 gossip 39219/133763 credits 244389.
+// Sniff 19:42:18 Kalecgos 238913 on map 2444. Stand a few yards in front, facing him.
+static constexpr uint32 MAP_DRAGON_ISLES = 2444;
+static constexpr Position DragonIslesArrivalPos = { 3702.50f, -1888.20f, 4.48f, 2.8967f };
+
+static uint32 GetDragonIslesTravelQuestId(Player const* player)
+{
+    if (player->GetQuestStatus(QUEST_SPEAK_TO_KALECGOS) == QUEST_STATUS_INCOMPLETE
+        || player->GetQuestStatus(QUEST_SPEAK_TO_KALECGOS) == QUEST_STATUS_COMPLETE)
+        return QUEST_SPEAK_TO_KALECGOS;
+    if (player->GetQuestStatus(QUEST_SPEAK_TO_KALECGOS_HORDE) == QUEST_STATUS_INCOMPLETE
+        || player->GetQuestStatus(QUEST_SPEAK_TO_KALECGOS_HORDE) == QUEST_STATUS_COMPLETE)
+        return QUEST_SPEAK_TO_KALECGOS_HORDE;
+    return 0;
+}
+
+// 244389 - Kalecgos on Exile's Reach. Sniff 19:41:08 gossip 39219/133763 credits 244389,
+// then the player appears on the Wild Coast next to 238913.
 struct npc_kalecgos_exiles_reach : public ScriptedAI
 {
     npc_kalecgos_exiles_reach(Creature* creature) : ScriptedAI(creature) { }
@@ -7625,11 +7649,41 @@ struct npc_kalecgos_exiles_reach : public ScriptedAI
         if (menuId != GOSSIP_MENU_KALECGOS_DRAGON_ISLES || gossipListId != GOSSIP_OPTION_KALECGOS_DRAGON_ISLES)
             return false;
 
-        if (player->GetQuestStatus(QUEST_SPEAK_TO_KALECGOS) != QUEST_STATUS_INCOMPLETE)
+        uint32 const travelQuestId = GetDragonIslesTravelQuestId(player);
+        if (!travelQuestId)
             return false;
 
         CloseGossipMenuFor(player);
         player->KilledMonsterCredit(NPC_KALECGOS_EXILES_REACH);
+
+        if (Quest const* quest = sObjectMgr->GetQuestTemplate(travelQuestId))
+            if (player->GetQuestStatus(travelQuestId) == QUEST_STATUS_COMPLETE)
+                player->RewardQuest(quest, LootItemType::Item, 0, me, false);
+
+        player->TeleportTo(MAP_DRAGON_ISLES, DragonIslesArrivalPos.GetPositionX(), DragonIslesArrivalPos.GetPositionY(),
+            DragonIslesArrivalPos.GetPositionZ(), DragonIslesArrivalPos.GetOrientation());
+        return true;
+    }
+};
+
+// 156501 leave-citadel gossip when ScriptName is npc_kalecgos_darkmaul_leave.
+// The dungeon fight itself uses boss_ravnyr on the same entry.
+struct npc_kalecgos_darkmaul_leave : public ScriptedAI
+{
+    npc_kalecgos_darkmaul_leave(Creature* creature) : ScriptedAI(creature) { }
+
+    bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
+    {
+        if (menuId != GOSSIP_MENU_KALECGOS_LEAVE_DARKMAUL || gossipListId != GOSSIP_OPTION_KALECGOS_LEAVE_DARKMAUL)
+            return false;
+
+        if (player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL) != QUEST_STATUS_INCOMPLETE
+            && player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL_HORDE) != QUEST_STATUS_INCOMPLETE)
+            return false;
+
+        CloseGossipMenuFor(player);
+        player->KilledMonsterCredit(NPC_KILL_CREDIT_LEAVE_DARKMAUL);
+        player->CastSpell(player, SPELL_LEAVE_DARKMAUL_CITADEL, true);
         return true;
     }
 };
@@ -7972,6 +8026,7 @@ void AddSC_zone_exiles_reach()
     RegisterCreatureAI(npc_alliance_mage_polymorph_dummy);
     RegisterCreatureAI(npc_meredy_huntswell_ogre);
     RegisterCreatureAI(npc_kalecgos_exiles_reach);
+    RegisterCreatureAI(npc_kalecgos_darkmaul_leave);
     RegisterCreatureAI(npc_quartermaster_repair_exiles);
     RegisterCreatureAI(npc_ogre_disguise_prisoner);
     RegisterCreatureAI(npc_ogre_runestone_stalker);
