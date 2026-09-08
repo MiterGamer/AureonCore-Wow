@@ -1,5 +1,44 @@
 # Changelog - 2026-09-06
 
+## Version 0.2.4 — 8 September 2026 at 19:05 CEST
+
+- Added four missing named equipment drops for Great Father Arctikus, Frostmane Novice and the current Frostmane Seer.
+- Used documented public retail sample rates as estimates; preserved all existing loot and difficulty mappings. No obsolete quest loot or Classic drop-rate tables imported.
+- Migration 21 applied remotely; transaction rollback and repeat-import checks passed. Complete loot pools and in-game generation remain unverified.
+
+Details: [Loot restoration](doc/LOOT_REPAIR_0.2.4.md).
+
+
+## Version 0.2.4 — 8 September 2026 at 18:54 CEST
+
+- Restored missing stationary quest-giver spawns for Magistrix Erona, Lanthan Perilon and Proenitus.
+- Preserved their existing templates, scripts, ten quest-start links and eight quest-end links.
+- Used legacy position references corroborated by public locations and local build-69497 terrain; exact retail phasing and gameplay remain unverified. Deferred Megelon pending model-collision height validation.
+- Applied migration 20 remotely after transaction rollback, duplicate-prevention and exact template/relation checks. Restart worldserver; no new executable required.
+
+Details: [Starting-area NPC restoration](doc/STARTING_NPCS_0.2.4.md).
+
+
+## Version 0.2.3 — 8 September 2026 at 18:22 CEST
+
+- Corrected four all-zero object rotations using the existing loader orientation fallback (migration 19, applied remotely).
+- Exact transaction rollback, normalized rotation checks and repeat import passed. No gameplay content or NPC text was invented; large missing-content groups remain unresolved.
+
+
+## Version 0.2.3 — 8 September 2026 at 18:12 CEST
+
+- Restored four missing initiating area-trigger actions for quest 10085 from the original TrinityCore script. Existing linked credits could not trigger without them.
+- Preserved quest conditions and credit rows; verified dependencies, exact transaction rollback and repeat import. Applied migration 18 remotely.
+- Restart worldserver and test the four quest locations. No new executable required; live gameplay validation remains pending.
+
+
+## Version 0.2.3 — September 8, 2026 at 17:59 CEST
+
+- Reviewed the new startup logs: 20,590 DB messages; the seven targeted Mist/Protector of the Frail messages are absent. Successful login is not recorded in these logs.
+- Corrected six dangling terminal area-trigger SmartAI links in migration 17, preserving direct actions and conditions. Applied remotely with backup, exact transaction rollback and repeat-import checks.
+- No binary change; restart worldserver for verification. Remaining missing content and spell rules are unresolved.
+
+
 ## Exile's Reach Quest and NPC Fixes
 
 ### Fixed

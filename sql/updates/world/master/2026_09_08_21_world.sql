@@ -1,0 +1,9 @@
+-- Aureon Core 0.2.4: four missing named retail drops.
+-- Chances approximate public Wowhead retail observations, not confirmed Blizzard server rates.
+-- Additive only; existing loot and difficulty mappings are retained.
+START TRANSACTION;
+INSERT INTO creature_loot_template (Entry,ItemType,Item,Chance,QuestRequired,LootMode,GroupId,MinCount,MaxCount,Comment) SELECT 1260,0,2546,5.55,0,1,0,1,1,'Aureon 0.2.4: Royal Frostmane Girdle; public retail sample rate' WHERE NOT EXISTS(SELECT 1 FROM creature_loot_template WHERE Entry=1260 AND ItemType=0 AND Item=2546) AND EXISTS(SELECT 1 FROM creature_template_difficulty WHERE Entry=1260 AND DifficultyID=0 AND LootID=1260);
+INSERT INTO creature_loot_template (Entry,ItemType,Item,Chance,QuestRequired,LootMode,GroupId,MinCount,MaxCount,Comment) SELECT 1260,0,3223,1.95,0,1,0,1,1,'Aureon 0.2.4: Frostmane Scepter; public retail sample rate' WHERE NOT EXISTS(SELECT 1 FROM creature_loot_template WHERE Entry=1260 AND ItemType=0 AND Item=3223) AND EXISTS(SELECT 1 FROM creature_template_difficulty WHERE Entry=1260 AND DifficultyID=0 AND LootID=1260);
+INSERT INTO creature_loot_template (Entry,ItemType,Item,Chance,QuestRequired,LootMode,GroupId,MinCount,MaxCount,Comment) SELECT 946,0,2110,0.48,0,1,0,1,1,'Aureon 0.2.4: Light Magesmith Robe; public retail sample rate' WHERE NOT EXISTS(SELECT 1 FROM creature_loot_template WHERE Entry=946 AND ItemType=0 AND Item=2110) AND EXISTS(SELECT 1 FROM creature_template_difficulty WHERE Entry=946 AND DifficultyID=0 AND LootID=946);
+INSERT INTO creature_loot_template (Entry,ItemType,Item,Chance,QuestRequired,LootMode,GroupId,MinCount,MaxCount,Comment) SELECT 41121,0,2257,0.23,0,1,0,1,1,'Aureon 0.2.4: Frostmane Staff; public retail sample rate' WHERE NOT EXISTS(SELECT 1 FROM creature_loot_template WHERE Entry=41121 AND ItemType=0 AND Item=2257) AND EXISTS(SELECT 1 FROM creature_template_difficulty WHERE Entry=41121 AND DifficultyID=0 AND LootID=41121);
+COMMIT;
