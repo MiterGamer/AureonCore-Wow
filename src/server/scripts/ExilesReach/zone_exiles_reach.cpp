@@ -7222,6 +7222,7 @@ enum RescueOfMeredyData
     EVENT_RESCUE_CONVERSATION_BLOODBEAK,
     EVENT_RESCUE_SUMMON_BLOODBEAK,
     EVENT_HENRY_HEAL,
+    EVENT_RESCUE_EXIT,
 
     POINT_RESCUE_ROOST_ENTRANCE         = 1
 };
@@ -7379,8 +7380,24 @@ struct npc_meredy_huntswell_ritual : public ScriptedAI
         if (_playerGuid.IsEmpty())
             return;
         Player* owner = GetRescuePlayer(me, _playerGuid);
+        if (owner && !_freed && owner->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) == QUEST_STATUS_COMPLETE)
+        {
+            _freed = true;
+            _events.Reset();
+            me->RemoveAllAuras();
+            me->SetAIAnimKitId(0);
+            me->SetControlled(false, UNIT_STATE_ROOT);
+            me->SetHover(false);
+            me->SetDisableGravity(false);
+            me->SetReactState(REACT_PASSIVE);
+            me->CombatStop();
+            _events.ScheduleEvent(EVENT_RESCUE_EXIT, 7s);
+            me->DespawnOrUnsummon(90s); // Navigation cleanup fallback.
+        }
         if (!owner || !owner->IsAlive() || !me->IsWithinDistInMap(owner, 180.0f)
-            || owner->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) != QUEST_STATUS_INCOMPLETE)
+            || (!_freed && owner->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) != QUEST_STATUS_INCOMPLETE)
+            || (_freed && owner->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) != QUEST_STATUS_COMPLETE
+                && owner->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) != QUEST_STATUS_REWARDED))
         {
             _events.Reset();
             _summons.DespawnAll();
@@ -7426,13 +7443,31 @@ struct npc_meredy_huntswell_ritual : public ScriptedAI
                 case EVENT_RESCUE_SUMMON_BLOODBEAK:
                     SummonRescueHostile(me, player, NPC_BLOODBEAK, BloodbeakDescendPos, true, FACTION_BLOODBEAK);
                     break;
+                case EVENT_RESCUE_EXIT:
+                    me->SetWalk(false);
+                    me->GetMotionMaster()->MovePoint(2, 494.91058f, -2361.1357f, 159.7431f);
+                    break;
                 default:
                     break;
             }
         }
     }
 
+    void MovementInform(uint32 type, uint32 id) override
+    {
+        if (!_freed || type != POINT_MOTION_TYPE)
+            return;
+        if (id == 2)
+            me->GetMotionMaster()->MovePoint(POINT_RESCUE_ROOST_ENTRANCE, RescueRoostEntrancePos);
+        else if (id == POINT_RESCUE_ROOST_ENTRANCE)
+        {
+            _summons.DespawnAll();
+            me->DespawnOrUnsummon(1s);
+        }
+    }
+
 private:
+    bool _freed = false;
     EventMap _events;
     ObjectGuid _playerGuid;
     ObjectGuid _keela;

@@ -1,5 +1,29 @@
 # Changelog - 2026-09-06
 
+## Version 0.2.4 — 8 September 2026 at 21:08 CEST
+
+- Fixed Meredy's personal rescue ending: release ritual effects and move her toward the roost entrance instead of deleting the personal actor immediately on completion.
+- Hide the public captive only for players who completed the quest; unfinished players retain their own view. Personal clones remain owner-only.
+- Release build passed; migration 24 applied remotely with rollback and repeat-import checks. New worldserver required; two-player gameplay verification remains pending.
+
+Details: [Meredy personal exit](doc/MEREDY_PERSONAL_EXIT_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 20:30 CEST
+
+- Compared The Rescue of Meredy Huntswell (55763) with the retail capture: verified gossip entry, timed Bloodbeak appearance and boss-kill objective.
+- Removed the obsolete permanent Bloodbeak fallback spawn that duplicated the scripted event boss. Preserved quest and script bindings.
+- Migration 23 applied remotely with a row backup, transaction rollback and repeat-import checks. Restart worldserver; no new executable required. Full client sequence remains unverified.
+
+Details: [Meredy rescue review](doc/MEREDY_REVIEW_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 20:12 CEST
+
+- Disabled unintended melee attacks from four invisible helpers around Lightspawn during Freeing the Light, using the existing passive NullCreatureAI.
+- Preserved spawns, phases, faction and quest data. Migration 22 applied remotely; exact rollback, AI-only change and repeat-import checks passed.
+- Restart worldserver to activate the change for existing helpers. No new executable required; live quest verification remains pending.
+
+Details: [Invisible helper repair](doc/INVISBUNNY_0.2.4.md).
+
 ## Version 0.2.4 — 8 September 2026 at 20:00 CEST
 
 - Added explicit cleanup after the Scout-o-Matic/Choppy Booster return flight; missing construction conversations no longer block miniature-drone cleanup.
