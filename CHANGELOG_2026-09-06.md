@@ -1,5 +1,23 @@
 # Changelog - 2026-09-06
 
+## Version 0.2.4 — 8 September 2026 at 20:00 CEST
+
+- Added explicit cleanup after the Scout-o-Matic/Choppy Booster return flight; missing construction conversations no longer block miniature-drone cleanup.
+- Restored Ralia Dreamchaser's descent to the cave floor and movement to her waiting position using retail sniff coordinates and timing.
+- Fixed Repair All skipping damaged items with zero calculated repair cost. Six isolated regression assertions passed; Release build successful.
+- Re-Sizer mouse activation remains under investigation; existing item/spell bindings were verified. In-game verification is pending for the implemented changes.
+
+Details: [Exile's Reach follow-up](doc/EXILES_FOLLOWUP_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 19:48 CEST
+
+- Adjusted the Lindie/Cork rescue in Down with the Quilboar: preserve visibility in the quest-completion phase and prevent duplicate release actions.
+- Retained the rescue jump and spoken line; replace the short fixed despawn with arrival-based cleanup and a navigation timeout.
+- Release build and executable startup/version checks passed; installed the new worldserver and matching runtime libraries locally with a backup. In-game rescue verification remains pending.
+- The subsequent story conversation still requires missing conversation-line data and trigger binding; this patch does not restore that separate dialogue.
+
+Details: [Briarpatch rescue](doc/BRIARPATCH_RESCUE_0.2.4.md).
+
 ## Version 0.2.4 — 8 September 2026 at 19:05 CEST
 
 - Added four missing named equipment drops for Great Father Arctikus, Frostmane Novice and the current Frostmane Seer.

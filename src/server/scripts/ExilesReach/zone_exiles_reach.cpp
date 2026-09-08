@@ -4574,6 +4574,9 @@ enum BriarpatchPrisonerData
 {
     EVENT_RUN_TO_PLAINS = 1,
 
+    PHASE_BRIARPATCH_COMPLETE_ALLIANCE = 13776,
+    PHASE_BRIARPATCH_COMPLETE_HORDE = 15315,
+
     SAY_GET_OUT_OF_HERE = 0
 };
 
@@ -4595,8 +4598,13 @@ struct npc_briarpatch_prisoner : public ScriptedAI
 
     void DoAction(int32 param) override
     {
-        if (param == ACTION_FREE_PRISONER)
+        if (param == ACTION_FREE_PRISONER && !_freed)
         {
+            _freed = true;
+            // The summon inherits the ritual bunny's pre-completion phase.
+            // Keep the rescue visible when the boss credit changes the player's phase.
+            PhasingHandler::AddPhase(me, me->GetEntry() == NPC_CORK_FIZZLEPOP
+                ? PHASE_BRIARPATCH_COMPLETE_HORDE : PHASE_BRIARPATCH_COMPLETE_ALLIANCE, true);
             me->RemoveAllAuras();
             me->SetDisableGravity(false);
             me->SetControlled(false, UNIT_STATE_ROOT);
@@ -4604,6 +4612,12 @@ struct npc_briarpatch_prisoner : public ScriptedAI
             Talk(SAY_GET_OUT_OF_HERE);
             _events.ScheduleEvent(EVENT_RUN_TO_PLAINS, 4s);
         }
+    }
+
+    void MovementInform(uint32 type, uint32 id) override
+    {
+        if (_freed && type == POINT_MOTION_TYPE && id == EVENT_RUN_TO_PLAINS)
+            me->DespawnOrUnsummon(1s);
     }
 
     void UpdateAI(uint32 diff) override
@@ -4615,8 +4629,8 @@ struct npc_briarpatch_prisoner : public ScriptedAI
             switch (eventId)
             {
                 case EVENT_RUN_TO_PLAINS:
-                    me->GetMotionMaster()->MovePoint(0, PrisonerBriarpatchDespawnPosition);
-                    me->DespawnOrUnsummon(5s);
+                    me->GetMotionMaster()->MovePoint(EVENT_RUN_TO_PLAINS, PrisonerBriarpatchDespawnPosition);
+                    me->DespawnOrUnsummon(30s); // Cleanup if navigation cannot reach the exit.
                     break;
                 default:
                     break;
@@ -4625,6 +4639,7 @@ struct npc_briarpatch_prisoner : public ScriptedAI
     }
 private:
     EventMap _events;
+    bool _freed = false;
 };
 
 enum OgreOverseerQuilboarText
@@ -4946,12 +4961,12 @@ struct npc_gnome_goblin_plains_make_copter_private : public ScriptedAI
                     if (Player* player = ObjectAccessor::GetPlayer(*me, me->GetPrivateObjectOwner()))
                     {
                         Conversation* conversation = Conversation::CreateConversation(_conversationId, player, *player, player->GetGUID(), nullptr, false);
-                        if (!conversation)
-                            break;
-
-                        conversation->AddActor(_conversationActorId, 0, me->GetGUID());
-                        conversation->AddActor(CONVERSATION_ACTOR_COPTER, 1, _copterGUID);
-                        conversation->Start();
+                        if (conversation)
+                        {
+                            conversation->AddActor(_conversationActorId, 0, me->GetGUID());
+                            conversation->AddActor(CONVERSATION_ACTOR_COPTER, 1, _copterGUID);
+                            conversation->Start();
+                        }
                     }
 
                     if (Creature* copter = ObjectAccessor::GetCreature(*me, _copterGUID))
@@ -5120,9 +5135,13 @@ struct npc_scoutomatic_5000 : public ScriptedAI
         {
             player->CastSpell(player, SPELL_SCENE_OGRE_RUINS_ALLIANCE);
         }
-        else
+        else if (pathId == PATH_COPTER_FROM_RUINS)
         {
             player->CastSpell(player, SCOUT_O_MATIC_DESUMMON, CastSpellExtraArgs(TRIGGERED_IGNORE_CASTER_MOUNTED_OR_ON_VEHICLE));
+            if (player->GetVehicleBase() == me)
+                player->ExitVehicle();
+            player->RemoveAurasDueToSpell(SPELL_ROPED_DNT);
+            me->DespawnOrUnsummon(1s);
             player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
         }
     }
@@ -5215,9 +5234,13 @@ struct npc_choppy_booster_scout : public ScriptedAI
         {
             player->CastSpell(player, SPELL_SCENE_OGRE_RUINS_HORDE);
         }
-        else
+        else if (pathId == PATH_COPTER_FROM_RUINS)
         {
             player->CastSpell(player, SCOUT_O_MATIC_DESUMMON, CastSpellExtraArgs(TRIGGERED_IGNORE_CASTER_MOUNTED_OR_ON_VEHICLE));
+            if (player->GetVehicleBase() == me)
+                player->ExitVehicle();
+            player->RemoveAurasDueToSpell(SPELL_ROPED_DNT);
+            me->DespawnOrUnsummon(1s);
             player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT);
         }
     }
@@ -7474,7 +7497,7 @@ private:
 };
 
 // 156929 - Ralia Dreamchaser (Hrun's Barrow)
-// Retail 12.1: personal hover spawn, InteractSpellID 312463, click plays scene 2379/2775.
+// Retail 12.1: briefly suspended, then jumps down before the scene interaction.
 struct npc_ralia_dreamchaser_pit : public ScriptedAI
 {
     npc_ralia_dreamchaser_pit(Creature* creature) : ScriptedAI(creature), _rideStarted(false) { }
@@ -7482,11 +7505,35 @@ struct npc_ralia_dreamchaser_pit : public ScriptedAI
     void JustAppeared() override
     {
         Talk(0);
-        me->SetFloating(true);
-        me->SetHover(true);
+        me->SetDisableGravity(true);
+        me->SetControlled(true, UNIT_STATE_ROOT);
+        _events.ScheduleEvent(1, 1629ms);
         me->SetNpcFlag(UNIT_NPC_FLAG_SPELLCLICK);
         me->SetUninteractible(false);
         me->SetImmuneToPC(true);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        _events.Update(diff);
+        if (_events.ExecuteEvent() == 1)
+        {
+            me->SetHover(false);
+            me->SetDisableGravity(false);
+            me->SetControlled(false, UNIT_STATE_ROOT);
+            me->GetMotionMaster()->MoveJump(1, { 73.7066f, -2130.47f, -30.0468f }, 548ms, 0.7241494f);
+        }
+    }
+
+    void MovementInform(uint32 type, uint32 id) override
+    {
+        if (id != 1 || _rideStarted)
+            return;
+
+        if (type == EFFECT_MOTION_TYPE)
+            me->GetMotionMaster()->MovePoint(1, 74.52984f, -2134.3164f, -30.010345f);
+        else if (type == POINT_MOTION_TYPE)
+            me->SetFacingTo(5.272579f);
     }
 
     void OnSpellClick(Unit* clicker, bool spellClickHandled) override
@@ -7507,6 +7554,7 @@ struct npc_ralia_dreamchaser_pit : public ScriptedAI
 
 private:
     bool _rideStarted;
+    EventMap _events;
 };
 
 enum DarkmaulCitadelChainData
