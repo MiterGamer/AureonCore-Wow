@@ -9,4 +9,4 @@ INSERT INTO `creature`
  `spawntimesecs`, `wander_distance`, `currentwaypoint`, `curHealthPct`, `MovementType`,
  `npcflag`, `unit_flags`, `unit_flags2`, `unit_flags3`, `ScriptName`, `StringId`, `VerifiedBuild`)
 VALUES
-(8000941, 244389, 2175, 10424, 10530, '0', 0, 13417, 0, -1, 0, 0, 706.9167, -1870.1493, 186.96568, 1.27559614, 120, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, '', 'q55991_kalecgos_er', 69587);
+(8000941, 244389, 2175, 10424, 10530, '0', 0, 13417, 0, -1, 0, 0, 706.9167, -1870.1493, 186.96568, 1.27559614, 120, 0, 0, 100, 0, NULL, NULL, NULL, NULL, '', 'q55991_kalecgos_er', 69587);

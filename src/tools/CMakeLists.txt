@@ -13,3 +13,8 @@ add_subdirectory(map_extractor)
 add_subdirectory(vmap4_assembler)
 add_subdirectory(vmap4_extractor)
 add_subdirectory(mmaps_generator)
+
+option(BUILD_MAPDATA_AUDIT "Build the offline server-data diagnostic tool" OFF)
+if(BUILD_MAPDATA_AUDIT AND TARGET game)
+  add_subdirectory(mapdata_audit)
+endif()

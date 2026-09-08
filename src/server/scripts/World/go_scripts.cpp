@@ -38,6 +38,8 @@ EndContentData */
 #include "Log.h"
 #include "MotionMaster.h"
 #include "Player.h"
+#include "PlayerChoice.h"
+#include "ObjectMgr.h"
 #include "ScriptedCreature.h"
 #include "ScriptedGossip.h"
 #include "TemporarySummon.h"
@@ -1114,8 +1116,55 @@ public:
     }
 };
 
+// Initial Hero's Call selection recorded in build 69587, choice 505.
+// Keep the source object in the interaction so responses can be range checked.
+struct go_heros_call_board : public GameObjectAI
+{
+    using GameObjectAI::GameObjectAI;
+
+    bool OnGossipHello(Player* player) override
+    {
+        if (player->GetTeam() == ALLIANCE && player->IsAlive())
+            player->SendPlayerChoice(me->GetGUID(), 505);
+        return true;
+    }
+};
+
+class playerchoice_heros_call_board : public PlayerChoiceScript
+{
+public:
+    playerchoice_heros_call_board() : PlayerChoiceScript("playerchoice_heros_call_board") { }
+
+    void OnResponse(WorldObject* object, Player* player, PlayerChoice const* /*choice*/,
+        PlayerChoiceResponse const* response, uint16 /*clientIdentifier*/) override
+    {
+        GameObject* board = object ? object->ToGameObject() : nullptr;
+        if (!board || (board->GetEntry() != 281339 && board->GetEntry() != 278575)
+            || !board->IsWithinDistInMap(player) || !board->InSamePhase(player)
+            || player->GetTeam() != ALLIANCE || !player->IsAlive())
+            return;
+
+        uint32 questId;
+        switch (response->ResponseId)
+        {
+            case 1429: questId = 40519; break; // Legion: The Legion Returns
+            case 1014: questId = 34398; break; // Warlords of Draenor: The Dark Portal
+            case 984: questId = 27726; break;  // Hero's Call: Mount Hyjal!
+            default: return;
+        }
+
+        // Consume the selection before awarding anything; repeat packets cannot add twice.
+        player->PlayerTalkClass->GetInteractionData().Reset();
+        if (Quest const* quest = sObjectMgr->GetQuestTemplate(questId))
+            if (player->CanTakeQuest(quest, true) && player->CanAddQuest(quest, true))
+                player->AddQuestAndCheckCompletion(quest, board);
+    }
+};
+
 void AddSC_go_scripts()
 {
+    RegisterGameObjectAI(go_heros_call_board);
+    new playerchoice_heros_call_board();
     new go_gilded_brazier();
     new go_southfury_moonstone();
     new go_tablet_of_the_seven();

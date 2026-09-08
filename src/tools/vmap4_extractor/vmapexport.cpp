@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <map>
 #include <mutex>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include <cstdio>
@@ -78,6 +79,8 @@ char const* CascRegion = "eu";
 bool UseRemoteCasc = false;
 uint32 DbcLocale = 0;
 uint32 Threads = std::thread::hardware_concurrency();
+std::set<uint32> RequestedMaps;
+bool SkipGameobjectModels = false;
 
 // Constants
 
@@ -577,6 +580,21 @@ bool processArgv(int argc, char ** argv, const char *versionString)
             else
                 result = false;
         }
+        else if (strcmp("--map", argv[i]) == 0)
+        {
+            if (i + 1 < argc)
+            {
+                auto mapId = Trinity::StringTo<uint32>(argv[++i]);
+                if (mapId)
+                    RequestedMaps.insert(*mapId);
+                else
+                    result = false;
+            }
+            else
+                result = false;
+        }
+        else if (strcmp("--skip-gameobject-models", argv[i]) == 0)
+            SkipGameobjectModels = true;
         else if (strcmp("--threads", argv[i]) == 0)
         {
             if (i + 1 < argc && strlen(argv[i + 1]))
@@ -595,6 +613,8 @@ bool processArgv(int argc, char ** argv, const char *versionString)
     {
         printf("Extract %s.\n",versionString);
         printf("%s [-?][-s][-l][-d <path>][-p <product>]\n", argv[0]);
+        printf("   --map <id>: Extract only this map and its parents (repeatable).\n");
+        printf("   --skip-gameobject-models: Skip standalone gameobject models (diagnostics only).\n");
         printf("   -s  : (default) small size (data size optimization), ~500MB less vmap data.\n");
         printf("   -l  : large size, ~500MB more vmap data. (might contain more details)\n");
         printf("   -d  <path>: Path to the vector data source folder.\n");
@@ -711,13 +731,37 @@ int main(int argc, char ** argv)
     }
 
     // Extract models, listed in GameObjectDisplayInfo.dbc
-    ExtractGameobjectModels();
+    if (!SkipGameobjectModels)
+        ExtractGameobjectModels();
 
     //xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     //map.dbc
     if (success)
     {
         ReadMapTable();
+        if (!RequestedMaps.empty())
+        {
+            std::set<uint32> included = RequestedMaps;
+            for (uint32 requested : RequestedMaps)
+            {
+                auto itr = std::ranges::find(map_ids, requested, &MapEntry::Id);
+                if (itr == map_ids.end())
+                {
+                    printf("Requested map %u is unavailable.\n", requested);
+                    return 1;
+                }
+                while (itr->ParentMapID >= 0)
+                {
+                    uint32 parent = uint32(itr->ParentMapID);
+                    if (!included.insert(parent).second)
+                        break;
+                    itr = std::ranges::find(map_ids, parent, &MapEntry::Id);
+                    if (itr == map_ids.end())
+                        break;
+                }
+            }
+            std::erase_if(map_ids, [&included](MapEntry const& map) { return !included.contains(map.Id); });
+        }
         ReadLiquidMaterialTable();
         ReadLiquidTypeTable();
         ParsMapFiles();

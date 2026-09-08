@@ -16,7 +16,11 @@
  */
 
 #include "Player.h"
+#include "ObjectMgr.h"
+#include "QuestDef.h"
 #include "ScriptMgr.h"
+#include "ScriptedCreature.h"
+#include "ScriptedGossip.h"
 #include "SpellAuraEffects.h"
 #include "SpellScript.h"
 
@@ -26,6 +30,47 @@ namespace Quests
 {
     static constexpr uint32 CompleteMidnightCampaign = 90806;
 }
+
+// Basic quest interaction at the three recorded quest POIs. The retail escape
+// animation is not reconstructed. Progress belongs to the interacting player;
+// never despawn the shared actor or grant credit to nearby group members.
+struct npc_silvermoon_tiff : ScriptedAI
+{
+    npc_silvermoon_tiff(Creature* creature) : ScriptedAI(creature) { }
+
+    bool CanCapture(Player* player) const
+    {
+        constexpr uint32 entries[] = { 257255, 257262, 257264 };
+        constexpr uint32 objectives[] = { 468055, 468056, 468057 };
+        if (!player->IsAlive() || player->IsInCombat() ||
+            player->GetQuestStatus(94012) != QUEST_STATUS_INCOMPLETE ||
+            !me->IsWithinDistInMap(player, INTERACTION_DISTANCE) || !me->InSamePhase(player))
+            return false;
+        for (uint32 i = 0; i < 3; ++i)
+            if (me->GetEntry() == entries[i])
+                return !player->GetQuestObjectiveData(94012, objectives[i]) &&
+                    (!i || player->GetQuestObjectiveData(94012, objectives[i - 1]));
+        return false;
+    }
+
+    bool OnGossipHello(Player* player) override
+    {
+        ClearGossipMenuFor(player);
+        if (CanCapture(player))
+            AddGossipItemFor(player, GossipOptionNpc::None, "Catch Tiff.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 1);
+        SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, me->GetGUID());
+        return true;
+    }
+
+    bool OnGossipSelect(Player* player, uint32 /*menuId*/, uint32 gossipListId) override
+    {
+        uint32 action = player->PlayerTalkClass->GetGossipOptionAction(gossipListId);
+        CloseGossipMenuFor(player);
+        if (action == GOSSIP_ACTION_INFO_DEF + 1 && CanCapture(player))
+            player->KilledMonsterCredit(me->GetEntry(), me->GetGUID());
+        return true;
+    }
+};
 
 // 1278767 - [DNT] Skip Midnight Intro - Flag Campaign
 class spell_silvermoon_skip_midnight_intro : public SpellScript
@@ -50,4 +95,5 @@ void AddSC_silvermoon_city_midnight()
 
     // Spells
     RegisterSpellScript(spell_silvermoon_skip_midnight_intro);
+    RegisterCreatureAI(npc_silvermoon_tiff);
 }

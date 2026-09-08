@@ -16,14 +16,14 @@ VALUES
 (1825492, 391940, 54630),
 (1825492, 397291, 54630);
 
--- restore spawn-to-tracking mapping (SpawnId 64049 = creature 156900 Hrun)
+-- Restore the mapping for this database's Hrun spawns. Both objectives share
+-- one row: QuestObjectiveIds is a comma-separated list, not a scalar column.
 DELETE FROM `spawn_tracking` WHERE `SpawnTrackingId` = 1825492;
 INSERT INTO `spawn_tracking`
-(`SpawnTrackingId`, `SpawnType`, `SpawnId`, `QuestObjectiveId`)
-VALUES
-(1825492, 0, 64049, 391940),
-(1825492, 0, 64049, 397291);
+(`SpawnTrackingId`, `SpawnType`, `SpawnId`, `QuestObjectiveIds`)
+SELECT 1825492, 0, `guid`, '391940,397291'
+FROM `creature` WHERE `map` = 2175 AND `id` = 156900;
 
 -- Hrun must respawn after death so other party members can kill him too.
 -- Default spawntimesecs is 0 (never respawn). Set to 120 s like other quest bosses.
-UPDATE `creature` SET `spawntimesecs` = 120 WHERE `guid` = 64049 AND `id` = 156900;
+UPDATE `creature` SET `spawntimesecs` = 120 WHERE `map` = 2175 AND `id` = 156900;

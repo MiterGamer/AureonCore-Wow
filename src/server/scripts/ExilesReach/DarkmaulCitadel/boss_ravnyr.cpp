@@ -93,8 +93,13 @@ struct boss_ravnyr : public ScriptedAI
         }
 
         _defeated = false;
+        me->RemoveAurasDueToSpell(SPELL_POSSESSED_VISUAL);
+        me->RemoveAurasDueToSpell(SPELL_POSSESSED_ACTIVATE);
+        me->RemoveAurasDueToSpell(SPELL_RITUAL_DEFEAT);
+        me->SetFullHealth();
         me->SetReactState(REACT_PASSIVE);
         me->SetImmuneToPC(true);
+        me->SetImmuneToNPC(true);
         me->SetUninteractible(true);
         me->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
         me->SetFaction(FACTION_MONSTER_2);
@@ -122,6 +127,7 @@ struct boss_ravnyr : public ScriptedAI
             me->PlayOneShotAnimKitId(ANIM_KIT_RAVNYR_RISE);
             me->SetUninteractible(false);
             me->SetImmuneToPC(false);
+            me->SetImmuneToNPC(false);
         });
 
         _scheduler.Schedule(20s, [this](TaskContext const&)
@@ -143,7 +149,7 @@ struct boss_ravnyr : public ScriptedAI
 
     void EnterEvadeMode(EvadeReason why) override
     {
-        if (_defeated)
+        if (_defeated || !_awakening)
             return;
 
         if (instance)
@@ -170,7 +176,7 @@ struct boss_ravnyr : public ScriptedAI
 
     void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo*/) override
     {
-        if (_defeated)
+        if (_defeated || !_awakening)
         {
             damage = 0;
             return;
@@ -188,11 +194,17 @@ struct boss_ravnyr : public ScriptedAI
         if (menuId != GOSSIP_MENU_KALECGOS_LEAVE_DARKMAUL || gossipListId != GOSSIP_OPTION_KALECGOS_LEAVE_DARKMAUL)
             return false;
 
+        if (!_defeated || !instance || instance->GetBossState(DATA_RAVNYR) != DONE ||
+            !player->IsAlive() || player->IsInCombat() || !me->InSamePhase(player) ||
+            !me->IsWithinDistInMap(player, INTERACTION_DISTANCE))
+            return true;
+
         if (player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL) != QUEST_STATUS_INCOMPLETE
             && player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL_HORDE) != QUEST_STATUS_INCOMPLETE)
             return false;
 
-        player->KilledMonsterCredit(NPC_KILL_CREDIT_LEAVE_DARKMAUL);
+        player->KilledMonsterCredit(player->GetQuestStatus(QUEST_DUNGEON_DARKMAUL_CITADEL_HORDE) == QUEST_STATUS_INCOMPLETE
+            ? 167663 : NPC_KILL_CREDIT_LEAVE_DARKMAUL);
         CloseGossipMenuFor(player);
         player->CastSpell(player, SPELL_LEAVE_DARKMAUL_CITADEL, true);
         return true;
@@ -200,6 +212,20 @@ struct boss_ravnyr : public ScriptedAI
 
     void UpdateAI(uint32 diff) override
     {
+        if (_awakening && !_defeated && instance)
+        {
+            bool livingPlayer = false;
+            instance->instance->DoOnPlayers([&](Player* player)
+            {
+                if (player->IsAlive() && me->IsWithinDistInMap(player, 100.0f))
+                    livingPlayer = true;
+            });
+            if (!livingPlayer)
+            {
+                EnterEvadeMode(EvadeReason::Other);
+                return;
+            }
+        }
         _scheduler.Update(diff);
 
         if (_defeated || !UpdateVictim())

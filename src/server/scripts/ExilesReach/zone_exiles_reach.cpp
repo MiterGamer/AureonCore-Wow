@@ -22,6 +22,8 @@
 #include "CombatAI.h"
 #include "Containers.h"
 #include "Conversation.h"
+#include "GameObject.h"
+#include "GameObjectAI.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
 #include "LootItemType.h"
@@ -43,6 +45,7 @@
 #include "TemporarySummon.h"
 #include "VehicleDefines.h"
 #include "WorldStateMgr.h"
+#include <unordered_map>
 
 template<class privateAI, class publicAI>
 CreatureAI* GetPrivatePublicPairAISelector(Creature* creature)
@@ -7228,7 +7231,8 @@ static Player* GetRescuePlayer(Creature const* source, ObjectGuid const& playerG
 
 static Creature* SummonRescueHostile(Creature* meredy, Player* player, uint32 entry, Position const& pos, bool hover, uint32 faction)
 {
-    Creature* summoned = meredy->SummonCreature(entry, pos, TEMPSUMMON_DEAD_DESPAWN);
+    Creature* summoned = meredy->SummonCreature(entry, pos, TEMPSUMMON_TIMED_OR_DEAD_DESPAWN, 5min,
+        0, 0, meredy->GetPrivateObjectOwner());
     if (!summoned)
         return nullptr;
 
@@ -7247,7 +7251,8 @@ static Creature* SummonRescueHostile(Creature* meredy, Player* player, uint32 en
 
 static Creature* SummonRescueHelper(Creature* meredy, uint32 entry, Position const& pos)
 {
-    Creature* helper = meredy->SummonCreature(entry, pos, TEMPSUMMON_TIMED_DESPAWN, 5min);
+    Creature* helper = meredy->SummonCreature(entry, pos, TEMPSUMMON_TIMED_DESPAWN, 5min,
+        0, 0, meredy->GetPrivateObjectOwner());
     if (!helper)
         return nullptr;
 
@@ -7258,8 +7263,12 @@ static Creature* SummonRescueHelper(Creature* meredy, uint32 entry, Position con
 
 static void SendRescueHelperToRoost(Creature* source, uint32 entry)
 {
-    if (Creature* helper = source->FindNearestCreature(entry, 150.0f))
+    std::list<Creature*> helpers;
+    source->GetCreatureListWithEntryInGrid(helpers, entry, 150.0f);
+    for (Creature* helper : helpers)
     {
+        if (helper->GetPrivateObjectOwner() != source->GetPrivateObjectOwner())
+            continue;
         helper->SetReactState(REACT_PASSIVE);
         helper->CombatStop();
         helper->GetMotionMaster()->MovePoint(POINT_RESCUE_ROOST_ENTRANCE, RescueRoostEntrancePos);
@@ -7272,7 +7281,29 @@ static void SendRescueHelperToRoost(Creature* source, uint32 entry)
 // two more waves, conv 11739, Bloodbeak descends. Kill 153964 credits the quest.
 struct npc_meredy_huntswell_ritual : public ScriptedAI
 {
-    npc_meredy_huntswell_ritual(Creature* creature) : ScriptedAI(creature) { }
+    npc_meredy_huntswell_ritual(Creature* creature) : ScriptedAI(creature), _summons(me) { }
+
+    void JustSummoned(Creature* summon) override
+    {
+        _summons.Summon(summon);
+        if (summon->GetEntry() == NPC_KEELA_RESCUE_HELPER)
+            _keela = summon->GetGUID();
+        else if (summon->GetEntry() == NPC_HENRY_RESCUE_HELPER)
+            _henry = summon->GetGUID();
+    }
+
+    void SummonedCreatureDespawn(Creature* summon) override { _summons.Despawn(summon); }
+
+    void PlayRescueConversation(Player* player, uint32 id)
+    {
+        if (Conversation* conversation = Conversation::CreateConversation(id, player, *player, player->GetGUID(), nullptr, false))
+        {
+            conversation->AddActor(70729, 0, _keela);
+            conversation->AddActor(70728, 1, _henry);
+            if (!conversation->Start())
+                delete conversation;
+        }
+    }
 
     bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
     {
@@ -7280,6 +7311,25 @@ struct npc_meredy_huntswell_ritual : public ScriptedAI
             return false;
 
         if (player->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) != QUEST_STATUS_INCOMPLETE)
+            return false;
+
+        if (!me->IsPrivateObject())
+        {
+            std::erase_if(_personalRuns, [this](auto const& run)
+            {
+                return !ObjectAccessor::GetCreature(*me, run.second);
+            });
+            if (_personalRuns.contains(player->GetGUID()))
+                return false;
+            // A personal clone hides the public NPC only for this player.
+            if (Creature* clone = me->SummonPersonalClone(*me, TEMPSUMMON_TIMED_DESPAWN, 6min, 0, 0, player))
+            {
+                _personalRuns[player->GetGUID()] = clone->GetGUID();
+                return clone->AI()->OnGossipSelect(player, menuId, gossipListId);
+            }
+            return false;
+        }
+        if (!_playerGuid.IsEmpty() || me->GetPrivateObjectOwner() != player->GetGUID())
             return false;
 
         CloseGossipMenuFor(player);
@@ -7303,6 +7353,18 @@ struct npc_meredy_huntswell_ritual : public ScriptedAI
 
     void UpdateAI(uint32 diff) override
     {
+        if (_playerGuid.IsEmpty())
+            return;
+        Player* owner = GetRescuePlayer(me, _playerGuid);
+        if (!owner || !owner->IsAlive() || !me->IsWithinDistInMap(owner, 180.0f)
+            || owner->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) != QUEST_STATUS_INCOMPLETE)
+        {
+            _events.Reset();
+            _summons.DespawnAll();
+            _playerGuid.Clear();
+            me->DespawnOrUnsummon();
+            return;
+        }
         _events.Update(diff);
 
         while (uint32 eventId = _events.ExecuteEvent())
@@ -7316,11 +7378,14 @@ struct npc_meredy_huntswell_ritual : public ScriptedAI
                     break;
                 case EVENT_RESCUE_SUMMON_KEELA:
                     SummonRescueHelper(me, NPC_KEELA_RESCUE_HELPER, KeeLaRescueHelperPos);
+                    // Henry is referenced by the conversation before his later arrival packet.
+                    SummonRescueHelper(me, NPC_HENRY_RESCUE_HELPER, Position(490.04276f, -2404.112f, 154.1975f));
                     if (player)
-                        Conversation::CreateConversation(CONVERSATION_RESCUE_HELPERS, player, *player, player->GetGUID(), nullptr);
+                        PlayRescueConversation(player, CONVERSATION_RESCUE_HELPERS);
                     break;
                 case EVENT_RESCUE_SUMMON_HENRY:
-                    SummonRescueHelper(me, NPC_HENRY_RESCUE_HELPER, HenryRescueHelperPos);
+                    if (Creature* henry = ObjectAccessor::GetCreature(*me, _henry))
+                        henry->GetMotionMaster()->MovePoint(0, HenryRescueHelperPos);
                     break;
                 case EVENT_RESCUE_WAVE_3:
                     for (Position const& pos : HuntingWorgWave3Pos)
@@ -7333,7 +7398,7 @@ struct npc_meredy_huntswell_ritual : public ScriptedAI
                     break;
                 case EVENT_RESCUE_CONVERSATION_BLOODBEAK:
                     if (player)
-                        Conversation::CreateConversation(CONVERSATION_RESCUE_BLOODBEAK, player, *player, player->GetGUID(), nullptr);
+                        PlayRescueConversation(player, CONVERSATION_RESCUE_BLOODBEAK);
                     break;
                 case EVENT_RESCUE_SUMMON_BLOODBEAK:
                     SummonRescueHostile(me, player, NPC_BLOODBEAK, BloodbeakDescendPos, true, FACTION_BLOODBEAK);
@@ -7347,6 +7412,10 @@ struct npc_meredy_huntswell_ritual : public ScriptedAI
 private:
     EventMap _events;
     ObjectGuid _playerGuid;
+    ObjectGuid _keela;
+    ObjectGuid _henry;
+    SummonList _summons;
+    std::unordered_map<ObjectGuid, ObjectGuid> _personalRuns;
 };
 
 // 153964 - Bloodbeak (summoned during Rescue of Meredy, not a world spawn)
@@ -7364,10 +7433,11 @@ struct npc_bloodbeak_harpy_roost : public CombatAI
 
     void JustDied(Unit* killer) override
     {
-        if (Creature* meredy = me->FindNearestCreature(NPC_MEREDY_HUNTSWELL_RITUAL, 150.0f))
-            meredy->AI()->Talk(SAY_MEREDY_LETS_GO);
+        if (TempSummon* summon = me->ToTempSummon())
+            if (Creature* meredy = ObjectAccessor::GetCreature(*me, summon->GetSummonerGUID()))
+                meredy->AI()->Talk(SAY_MEREDY_LETS_GO);
 
-        if (Player* player = me->SelectNearestPlayer(150.0f))
+        if (Player* player = ObjectAccessor::GetPlayer(*me, me->GetPrivateObjectOwner()))
             if (player->GetQuestStatus(QUEST_RESCUE_OF_MEREDY) == QUEST_STATUS_INCOMPLETE)
                 player->KilledMonsterCredit(NPC_BLOODBEAK);
 
@@ -7392,7 +7462,7 @@ struct npc_henry_garrick_rescue_helper : public CombatAI
         _healEvents.Update(diff);
         if (_healEvents.ExecuteEvent() == EVENT_HENRY_HEAL)
         {
-            if (Player* player = me->SelectNearestPlayer(40.0f))
+            if (Player* player = ObjectAccessor::GetPlayer(*me, me->GetPrivateObjectOwner()))
                 DoCast(player, SPELL_HENRY_FLASH_HEAL);
             _healEvents.ScheduleEvent(EVENT_HENRY_HEAL, 8s);
         }
@@ -7524,9 +7594,14 @@ static float OgrePrisonerFollowAngle(uint32 entry)
 static void DespawnOgrePrisoners(Player* player)
 {
     for (uint32 entry : { NPC_PRISONER_CAPTAIN_GARRICK, NPC_PRISONER_JAINA, NPC_PRISONER_HENRY })
-        if (Creature* prisoner = player->FindNearestCreature(entry, 80.0f))
-            if (prisoner->GetOwnerGUID() == player->GetGUID() || prisoner->GetDemonCreatorGUID() == player->GetGUID())
+    {
+        std::list<Creature*> prisoners;
+        player->GetCreatureListWithEntryInGrid(prisoners, entry, 100.0f);
+        for (Creature* prisoner : prisoners)
+            if (prisoner->GetPrivateObjectOwner() == player->GetGUID()
+                || prisoner->GetOwnerGUID() == player->GetGUID() || prisoner->GetDemonCreatorGUID() == player->GetGUID())
                 prisoner->DespawnOrUnsummon();
+    }
 }
 
 // Sniff 19:24:07: credit 16893, spell 298359, then 298241/298232 drop. Core credits the AT
@@ -7548,12 +7623,23 @@ struct npc_meredy_huntswell_camp : public ScriptedAI
 {
     npc_meredy_huntswell_camp(Creature* creature) : ScriptedAI(creature) { }
 
+    bool OnGossipHello(Player* player) override
+    {
+        if (player->GetTeam() == ALLIANCE && player->GetClass() == CLASS_HUNTER && player->IsAlive() &&
+            player->GetMapId() == 2175 && me->InSamePhase(player) && me->IsWithinDistInMap(player, INTERACTION_DISTANCE) &&
+            player->GetQuestStatus(59355) == QUEST_STATUS_INCOMPLETE && !player->HasItemCount(175979, 1))
+            player->CastSpell(player, 321160, true);
+        return false;
+    }
+
     bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
     {
         if (menuId != GOSSIP_MENU_MEREDY_POLYMORPH || gossipListId != GOSSIP_OPTION_MEREDY_POLYMORPH)
             return false;
 
-        if (player->GetQuestStatus(QUEST_MAGE_THE_BEST_WAY_TO_USE_SHEEP) != QUEST_STATUS_INCOMPLETE)
+        if (player->GetClass() != CLASS_MAGE || !player->IsAlive() || player->IsInCombat() ||
+            !me->InSamePhase(player) || !me->IsWithinDistInMap(player, INTERACTION_DISTANCE) ||
+            player->GetQuestStatus(QUEST_MAGE_THE_BEST_WAY_TO_USE_SHEEP) != QUEST_STATUS_INCOMPLETE)
             return false;
 
         CloseGossipMenuFor(player);
@@ -7568,6 +7654,11 @@ struct npc_meredy_huntswell_camp : public ScriptedAI
 struct npc_alliance_mage_polymorph_dummy : public ScriptedAI
 {
     npc_alliance_mage_polymorph_dummy(Creature* creature) : ScriptedAI(creature) { }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*type*/, SpellInfo const* /*spell*/) override
+    {
+        damage = 0; // Keep the practice target available until its summon expires.
+    }
 
     void JustAppeared() override
     {
@@ -7584,10 +7675,717 @@ struct npc_alliance_mage_polymorph_dummy : public ScriptedAI
             return;
 
         Player* player = caster->ToPlayer();
-        if (!player)
+        TempSummon* summon = me->ToTempSummon();
+        if (!player || player->GetClass() != CLASS_MAGE || !player->IsAlive() ||
+            player->GetMapId() != 2175 || !summon || summon->GetSummonerGUID() != player->GetGUID() ||
+            player->GetQuestStatus(player->GetTeam() == ALLIANCE ? QUEST_MAGE_THE_BEST_WAY_TO_USE_SHEEP : 59955) != QUEST_STATUS_INCOMPLETE)
             return;
 
         player->KilledMonsterCredit(NPC_KILL_CREDIT_POLYMORPH_PRACTICE);
+    }
+};
+
+struct npc_exiles_herbert_mage : public ScriptedAI
+{
+    npc_exiles_herbert_mage(Creature* creature) : ScriptedAI(creature) { }
+    bool OnGossipHello(Player* player) override
+    {
+        if (player->GetTeam() == HORDE && player->GetClass() == CLASS_HUNTER && player->IsAlive() &&
+            player->GetMapId() == 2175 && me->InSamePhase(player) && me->IsWithinDistInMap(player, INTERACTION_DISTANCE) &&
+            player->GetQuestStatus(59952) == QUEST_STATUS_INCOMPLETE && !player->HasItemCount(175979, 1))
+            player->CastSpell(player, 321160, true);
+        if (player->GetTeam() != HORDE || player->GetClass() != CLASS_MAGE || !player->IsAlive() ||
+            player->IsInCombat() || player->GetMapId() != 2175 || !me->InSamePhase(player) ||
+            !me->IsWithinDistInMap(player, INTERACTION_DISTANCE) ||
+            player->GetQuestStatus(59955) != QUEST_STATUS_INCOMPLETE)
+            return false;
+        player->KilledMonsterCredit(167309);
+        std::list<Creature*> targets;
+        me->GetCreatureListWithEntryInGrid(targets, 168372, 70.0f);
+        for (Creature* target : targets)
+            if (target->GetPrivateObjectOwner() == player->GetGUID())
+                return false;
+        player->SummonCreature(168372, me->GetNearPosition(6.0f, 0.0f),
+            TEMPSUMMON_TIMED_DESPAWN, 5min, 0, 0, player->GetGUID());
+        return false;
+    }
+};
+
+static uint32 ExilesRecruitQuest(Player const* player)
+{
+    return player->GetTeam() == ALLIANCE ? 58960 : 59965;
+}
+
+static void PrepareExilesRecruits(Player* player, Creature* ghost)
+{
+    uint32 quest = ExilesRecruitQuest(player);
+    if (player->GetClass() != CLASS_PRIEST || !player->IsAlive() || player->GetMapId() != 2175 ||
+        player->GetQuestStatus(quest) != QUEST_STATUS_INCOMPLETE || !ghost->InSamePhase(player) ||
+        !ghost->IsWithinDistInMap(player, 20.0f))
+        return;
+    player->CastSpell(player, 317433, true); // Client override: Resurrection 2006 -> quest spell 317434.
+    uint32 entry = player->GetTeam() == ALLIANCE ? 163137 : 167592;
+    uint32 objective = player->GetTeam() == ALLIANCE ? 395224 : 397323;
+    uint32 needed = 3 - std::clamp(player->GetQuestObjectiveData(quest, objective), 0, 3);
+    std::list<Creature*> recruits;
+    player->GetCreatureListWithEntryInGrid(recruits, entry, 40.0f);
+    for (Creature* recruit : recruits)
+        if (recruit->GetPrivateObjectOwner() == player->GetGUID() && recruit->IsAIEnabled() && !recruit->AI()->GetData(0) && needed)
+            --needed;
+    for (uint32 i = 0; i < needed; ++i)
+        player->SummonCreature(entry, ghost->GetNearPosition(4.0f + i * 2.0f, float(i) * 1.5f),
+            TEMPSUMMON_TIMED_DESPAWN, 10min, 0, 0, player->GetGUID());
+}
+
+// Shared quest ghosts preserve their normal quest menus. Recruits are personal
+// and use collision-aware fallback positions near the existing ghost.
+struct npc_exiles_priest_introduction : public ScriptedAI
+{
+    npc_exiles_priest_introduction(Creature* creature) : ScriptedAI(creature) { }
+
+    bool OnGossipHello(Player* player) override
+    {
+        uint32 questId = me->GetEntry() == 163108 ? 58953 : 59961;
+        if (player->GetClass() == CLASS_PRIEST && player->IsAlive() &&
+            me->InSamePhase(player) && me->IsWithinDistInMap(player, INTERACTION_DISTANCE) &&
+            player->GetQuestStatus(questId) == QUEST_STATUS_INCOMPLETE)
+            player->KilledMonsterCredit(me->GetEntry());
+        PrepareExilesRecruits(player, me);
+        return false; // Preserve the ordinary quest menu and turn-in.
+    }
+
+    void OnQuestAccept(Player* player, Quest const* quest) override
+    {
+        if (quest->GetQuestId() == ExilesRecruitQuest(player))
+            PrepareExilesRecruits(player, me);
+    }
+};
+
+struct npc_exiles_recruit_resurrection : public ScriptedAI
+{
+    npc_exiles_recruit_resurrection(Creature* creature) : ScriptedAI(creature) { }
+    bool _rescued = false;
+    uint32 _ownerCheck = 1000;
+    uint32 GetData(uint32 /*id*/) const override { return _rescued; }
+
+    void JustAppeared() override
+    {
+        me->SetFaction(FACTION_FRIENDLY);
+        me->SetReactState(REACT_PASSIVE);
+        me->SetStandState(UNIT_STAND_STATE_DEAD);
+        me->SetImmuneToNPC(true);
+    }
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*type*/, SpellInfo const* /*spell*/) override { damage = 0; }
+    void UpdateAI(uint32 diff) override
+    {
+        if (_rescued)
+            return;
+        if (_ownerCheck > diff) { _ownerCheck -= diff; return; }
+        _ownerCheck = 1000;
+        Player* owner = ObjectAccessor::FindPlayer(me->GetPrivateObjectOwner());
+        if (!owner || owner->GetMap() != me->GetMap() || owner->GetQuestStatus(ExilesRecruitQuest(owner)) != QUEST_STATUS_INCOMPLETE)
+            me->DespawnOrUnsummon();
+    }
+    void SpellHit(WorldObject* caster, SpellInfo const* spell) override
+    {
+        Player* player = caster->ToPlayer();
+        if (_rescued || !spell || (spell->Id != 317434 && spell->Id != 317435) || !player ||
+            player->GetClass() != CLASS_PRIEST || !player->IsAlive() || player->GetMapId() != 2175 ||
+            me->GetPrivateObjectOwner() != player->GetGUID() || !me->InSamePhase(player) ||
+            player->GetQuestStatus(ExilesRecruitQuest(player)) != QUEST_STATUS_INCOMPLETE)
+            return;
+        _rescued = true;
+        me->SetStandState(UNIT_STAND_STATE_STAND);
+        player->KilledMonsterCredit(me->GetEntry(), me->GetGUID());
+        me->DespawnOrUnsummon(5s);
+    }
+};
+
+class quest_exiles_resurrect_recruits : public QuestScript
+{
+public:
+    quest_exiles_resurrect_recruits() : QuestScript("quest_exiles_resurrect_recruits") { }
+    void OnQuestStatusChange(Player* player, Quest const* /*quest*/, QuestStatus /*old*/, QuestStatus status) override
+    {
+        if (status == QUEST_STATUS_INCOMPLETE && player->GetMapId() == 2175)
+            player->CastSpell(player, 317433, true);
+        else
+            player->RemoveAurasDueToSpell(317433);
+        if (status == QUEST_STATUS_NONE || status == QUEST_STATUS_REWARDED)
+        {
+            std::list<Creature*> recruits;
+            player->GetCreatureListWithEntryInGrid(recruits, player->GetTeam() == ALLIANCE ? 163137 : 167592, 100.0f);
+            for (Creature* recruit : recruits)
+                if (recruit->GetPrivateObjectOwner() == player->GetGUID())
+                    recruit->DespawnOrUnsummon();
+        }
+    }
+};
+
+class player_exiles_recruit_override : public PlayerScript
+{
+public:
+    player_exiles_recruit_override() : PlayerScript("player_exiles_recruit_override") { }
+    void OnMapChanged(Player* player) override { Refresh(player); }
+    void OnLogin(Player* player, bool /*first*/) override { Refresh(player); }
+private:
+    static void Refresh(Player* player)
+    {
+        if (player->GetClass() == CLASS_PRIEST && player->GetMapId() == 2175 &&
+            player->GetQuestStatus(ExilesRecruitQuest(player)) == QUEST_STATUS_INCOMPLETE)
+            player->CastSpell(player, 317433, true);
+        else
+            player->RemoveAurasDueToSpell(317433);
+    }
+};
+
+static uint32 ExilesExecutionQuest(Player const* player)
+{
+    return player->GetTeam() == ALLIANCE ? 58915 : 59972;
+}
+
+// A personal opponent keeps the shared quest giver available to other players.
+struct npc_exiles_hjalmar_training : public ScriptedAI
+{
+    npc_exiles_hjalmar_training(Creature* creature) : ScriptedAI(creature) { }
+    uint32 _checkTimer = 1000;
+    bool _finished = false;
+    bool IsWarriorTraining() const { return me->GetEntry() == 162947; }
+    uint32 TrainingQuest(Player const* player) const
+    {
+        return IsWarriorTraining() ? ExilesExecutionQuest(player) : (player->GetTeam() == ALLIANCE ? 59349 : 59957);
+    }
+
+    void IsSummonedBy(WorldObject* summoner) override
+    {
+        if (Player* player = summoner->ToPlayer())
+        {
+            me->SetFaction(FACTION_MONSTER);
+            me->SetImmuneToPC(false);
+            me->SetImmuneToNPC(true);
+            me->SetReactState(REACT_DEFENSIVE);
+            AttackStart(player);
+        }
+    }
+
+    void DamageTaken(Unit* attacker, uint32& damage, DamageEffectType /*type*/, SpellInfo const* spell) override
+    {
+        Player* player = attacker ? attacker->ToPlayer() : nullptr;
+        if (_finished || !player || player->GetGUID() != me->GetPrivateObjectOwner() ||
+            player->GetClass() != (IsWarriorTraining() ? CLASS_WARRIOR : CLASS_MONK) || !player->IsAlive() ||
+            player->GetQuestStatus(TrainingQuest(player)) != QUEST_STATUS_INCOMPLETE)
+        {
+            damage = 0;
+            return;
+        }
+        if (damage < me->GetHealth())
+            return;
+        // Execute's damage children: Arms/Protection and Fury, including off-hand.
+        bool correctFinisher = spell && (IsWarriorTraining()
+            ? (spell->Id == 260798 || spell->Id == 280849 || spell->Id == 163558)
+            : (spell->Id == 322109 || spell->Id == 322111));
+        if (correctFinisher)
+        {
+            _finished = true;
+        }
+        else
+            damage = me->GetHealth() - 1;
+    }
+
+    void JustDied(Unit* /*killer*/) override
+    {
+        if (_finished)
+            if (Player* owner = ObjectAccessor::FindPlayer(me->GetPrivateObjectOwner()))
+                if (owner->GetQuestStatus(TrainingQuest(owner)) == QUEST_STATUS_INCOMPLETE)
+                    owner->KilledMonsterCredit(IsWarriorTraining() ? 174978 : 164865, me->GetGUID());
+        me->DespawnOrUnsummon(2s);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (_finished)
+            return;
+        if (_checkTimer <= diff)
+        {
+            _checkTimer = 1000;
+            Player* owner = ObjectAccessor::FindPlayer(me->GetPrivateObjectOwner());
+            if (!owner || !owner->IsAlive() || owner->GetMap() != me->GetMap() ||
+                !me->IsWithinDistInMap(owner, 60.0f) ||
+                owner->GetQuestStatus(TrainingQuest(owner)) != QUEST_STATUS_INCOMPLETE)
+            {
+                me->DespawnOrUnsummon();
+                return;
+            }
+        }
+        else
+            _checkTimer -= diff;
+        UpdateVictim(); // Creature updates perform melee swings in this core.
+    }
+};
+
+struct npc_exiles_hjalmar_questgiver : public ScriptedAI
+{
+    npc_exiles_hjalmar_questgiver(Creature* creature) : ScriptedAI(creature) { }
+    void StartTraining(Player* player)
+    {
+        if (player->GetClass() != CLASS_WARRIOR || !player->IsAlive() || player->IsInCombat() ||
+            player->GetMapId() != 2175 || !me->InSamePhase(player) ||
+            !me->IsWithinDistInMap(player, INTERACTION_DISTANCE) ||
+            player->GetQuestStatus(ExilesExecutionQuest(player)) != QUEST_STATUS_INCOMPLETE)
+            return;
+        std::list<Creature*> opponents;
+        me->GetCreatureListWithEntryInGrid(opponents, 162947, 70.0f);
+        for (Creature* opponent : opponents)
+            if (opponent->IsAlive() && opponent->GetPrivateObjectOwner() == player->GetGUID())
+                return;
+        player->SummonCreature(162947, me->GetNearPosition(5.0f, 0.0f),
+            TEMPSUMMON_TIMED_DESPAWN, 10min, 0, 0, player->GetGUID());
+    }
+    bool OnGossipHello(Player* player) override { StartTraining(player); return false; }
+    void OnQuestAccept(Player* player, Quest const* quest) override
+    {
+        if (quest->GetQuestId() == ExilesExecutionQuest(player))
+            StartTraining(player);
+    }
+};
+
+struct npc_exiles_monk_mentor : public ScriptedAI
+{
+    npc_exiles_monk_mentor(Creature* creature) : ScriptedAI(creature) { }
+    void StartLesson(Player* player)
+    {
+        if (player->GetClass() != CLASS_MONK || !player->IsAlive() || player->IsInCombat() ||
+            player->GetMapId() != 2175 || !me->InSamePhase(player) ||
+            !me->IsWithinDistInMap(player, INTERACTION_DISTANCE))
+            return;
+        uint32 meditation = player->GetTeam() == ALLIANCE ? 59347 : 59956;
+        if (player->GetQuestStatus(meditation) == QUEST_STATUS_INCOMPLETE)
+        {
+            if (!player->HasAura(320961))
+                player->CastSpell(player, 320961, false);
+            return;
+        }
+        uint32 spar = player->GetTeam() == ALLIANCE ? 59349 : 59957;
+        if (player->GetQuestStatus(spar) != QUEST_STATUS_INCOMPLETE)
+            return;
+        uint32 entry = player->GetTeam() == ALLIANCE ? 164865 : 167539;
+        std::list<Creature*> opponents;
+        me->GetCreatureListWithEntryInGrid(opponents, entry, 70.0f);
+        for (Creature* opponent : opponents)
+            if (opponent->IsAlive() && opponent->GetPrivateObjectOwner() == player->GetGUID())
+                return;
+        player->SummonCreature(entry, me->GetNearPosition(5.0f, 0.0f),
+            TEMPSUMMON_TIMED_DESPAWN, 10min, 0, 0, player->GetGUID());
+    }
+    bool OnGossipHello(Player* player) override { StartLesson(player); return false; }
+    void OnQuestAccept(Player* player, Quest const* /*quest*/) override { StartLesson(player); }
+};
+
+// Client meditation has a two-second periodic effect. Five uninterrupted ticks
+// are a functional fallback; the retail conversation timing is not captured.
+class spell_exiles_monk_meditation : public AuraScript
+{
+    uint32 _ticks = 0;
+    void OnTick(AuraEffect const* /*effect*/)
+    {
+        PreventDefaultAction(); // This native periodic slot has no trigger spell.
+        Player* player = GetTarget()->ToPlayer();
+        if (!player)
+            return;
+        uint32 quest = player->GetTeam() == ALLIANCE ? 59347 : 59956;
+        Creature* mentor = player->FindNearestCreature(player->GetTeam() == ALLIANCE ? 164835 : 167537, 10.0f, true);
+        if (player->GetClass() != CLASS_MONK || !player->IsAlive() || player->IsInCombat() ||
+            player->GetMapId() != 2175 || !mentor || !mentor->InSamePhase(player) ||
+            player->GetQuestStatus(quest) != QUEST_STATUS_INCOMPLETE)
+        {
+            player->InterruptNonMeleeSpells(false, 320961);
+            Remove();
+            return;
+        }
+        if (++_ticks == 5)
+        {
+            player->CastSpell(player, 321013, true);
+            player->InterruptNonMeleeSpells(false, 320961);
+            Remove();
+        }
+    }
+    void Register() override
+    {
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_exiles_monk_meditation::OnTick, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
+    }
+};
+
+struct npc_exiles_paladin_ghost : public ScriptedAI
+{
+    npc_exiles_paladin_ghost(Creature* creature) : ScriptedAI(creature) { }
+    bool OnGossipHello(Player* player) override
+    {
+        bool alliance = player->GetTeam() == ALLIANCE;
+        if (player->GetClass() != CLASS_PALADIN || !player->IsAlive() || player->GetMapId() != 2175 ||
+            me->GetEntry() != (alliance ? 162998u : 167179u) || !me->InSamePhase(player) ||
+            !me->IsWithinDistInMap(player, INTERACTION_DISTANCE))
+            return false;
+        if (player->GetQuestStatus(alliance ? 58923 : 59958) == QUEST_STATUS_INCOMPLETE)
+            player->KilledMonsterCredit(me->GetEntry());
+        if (player->GetQuestStatus(alliance ? 58946 : 60174) == QUEST_STATUS_INCOMPLETE)
+        {
+            player->GetSpellHistory()->ResetCooldown(642, true);
+            player->KilledMonsterCredit(me->GetEntry());
+        }
+        return false;
+    }
+};
+
+struct go_exiles_necrotic_altar : public GameObjectAI
+{
+    go_exiles_necrotic_altar(GameObject* go) : GameObjectAI(go) { }
+    bool OnGossipHello(Player* player) override
+    {
+        if (player->GetClass() == CLASS_PALADIN && player->IsAlive() && player->GetMapId() == 2175 &&
+            me->GetEntry() == (player->GetTeam() == ALLIANCE ? 342068u : 351423u) &&
+            player->HasAura(642) && me->InSamePhase(player) && me->IsWithinDistInMap(player, INTERACTION_DISTANCE) &&
+            player->GetQuestStatus(player->GetTeam() == ALLIANCE ? 58946 : 60174) == QUEST_STATUS_INCOMPLETE)
+        {
+            if (player->GetTeam() == ALLIANCE)
+                player->CastSpell(player, 344119, true);
+            else
+                player->KillCreditGO(351423, me->GetGUID());
+        }
+        return true;
+    }
+};
+
+struct npc_exiles_class_corpse : public ScriptedAI
+{
+    npc_exiles_class_corpse(Creature* creature) : ScriptedAI(creature) { }
+    void JustAppeared() override
+    {
+        me->SetStandState(UNIT_STAND_STATE_DEAD);
+        me->SetReactState(REACT_PASSIVE);
+        me->SetImmuneToNPC(true);
+    }
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*type*/, SpellInfo const* /*spell*/) override { damage = 0; }
+    bool OnGossipHello(Player* player) override
+    {
+        bool rogue = me->GetEntry() == 162972 || me->GetEntry() == 167184;
+        bool alliance = player->GetTeam() == ALLIANCE;
+        uint32 entry = rogue ? (alliance ? 162972 : 167184) : (alliance ? 163209 : 167478);
+        uint32 quest = rogue ? (alliance ? 58917 : 59967) : (alliance ? 58962 : 59970);
+        if (me->GetEntry() == entry && player->GetClass() == (rogue ? CLASS_ROGUE : CLASS_WARLOCK) &&
+            player->IsAlive() && player->GetMapId() == 2175 && me->InSamePhase(player) &&
+            me->IsWithinDistInMap(player, INTERACTION_DISTANCE) && player->GetQuestStatus(quest) == QUEST_STATUS_INCOMPLETE)
+            player->KilledMonsterCredit(entry);
+        return false;
+    }
+};
+
+struct npc_exiles_gutgruk : public ScriptedAI
+{
+    npc_exiles_gutgruk(Creature* creature) : ScriptedAI(creature) { }
+    uint32 _kickTimer = 8000;
+    void Reset() override
+    {
+        _kickTimer = 8000;
+        me->CastSpell(me, 317209, true);
+    }
+    void SpellHit(WorldObject* caster, SpellInfo const* spell) override
+    {
+        Player* player = caster->ToPlayer();
+        if (spell && spell->Id == 315585 && player && player->GetClass() == CLASS_ROGUE &&
+            player->GetQuestStatus(player->GetTeam() == ALLIANCE ? 58933 : 59968) == QUEST_STATUS_INCOMPLETE)
+            me->RemoveAurasDueToSpell(317209);
+    }
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+        if (_kickTimer <= diff)
+        {
+            DoCastVictim(306399);
+            _kickTimer = 10000;
+        }
+        else
+            _kickTimer -= diff;
+    }
+};
+
+class spell_exiles_voidwalker_ritual : public SpellScript
+{
+    SpellCastResult CheckCast()
+    {
+        Player* player = GetCaster()->ToPlayer();
+        if (!player || player->GetClass() != CLASS_WARLOCK || !player->IsAlive() || player->GetMapId() != 2175 ||
+            player->GetQuestStatus(player->GetTeam() == ALLIANCE ? 58962 : 59970) != QUEST_STATUS_INCOMPLETE ||
+            !player->HasItemCount(174947, 1) ||
+            !player->FindNearestCreature(player->GetTeam() == ALLIANCE ? 163209 : 167478, 25.0f, true))
+            return SPELL_FAILED_BAD_TARGETS;
+        return SPELL_CAST_OK;
+    }
+    void SelectTarget(WorldObject*& target) { target = GetCaster(); }
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(spell_exiles_voidwalker_ritual::CheckCast);
+        OnObjectTargetSelect += SpellObjectTargetSelectFn(spell_exiles_voidwalker_ritual::SelectTarget, EFFECT_0, TARGET_UNIT_NEARBY_ENTRY);
+    }
+};
+
+class spell_exiles_voidwalker_ritual_aura : public AuraScript
+{
+    void OnRemove(AuraEffect const* /*effect*/, AuraEffectHandleModes /*mode*/)
+    {
+        if (GetTargetApplication()->GetRemoveMode() != AURA_REMOVE_BY_EXPIRE)
+            return;
+        Player* player = GetTarget()->ToPlayer();
+        if (!player || player->GetClass() != CLASS_WARLOCK || !player->IsAlive() || player->GetMapId() != 2175 ||
+            player->GetQuestStatus(player->GetTeam() == ALLIANCE ? 58962 : 59970) != QUEST_STATUS_INCOMPLETE ||
+            !player->HasItemCount(174947, 1))
+            return;
+        Creature* corpse = player->FindNearestCreature(player->GetTeam() == ALLIANCE ? 163209 : 167478, 25.0f, true);
+        if (!corpse)
+            return;
+        player->SummonCreature(player->GetTeam() == ALLIANCE ? 163218 : 167482, corpse->GetNearPosition(3.0f, 0.0f),
+            TEMPSUMMON_TIMED_DESPAWN, 30s, 0, 0, player->GetGUID());
+        player->CastSpell(player, 317612, true); // Native faction-specific summon objectives.
+    }
+    void Register() override
+    {
+        AfterEffectRemove += AuraEffectRemoveFn(spell_exiles_voidwalker_ritual_aura::OnRemove, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL, AURA_EFFECT_HANDLE_REAL);
+    }
+};
+
+static uint32 ExilesShamanQuest(Player const* player) { return player->GetTeam() == ALLIANCE ? 59002 : 59969; }
+static bool ExilesShamanSight(Player const* player)
+{
+    return player->GetClass() == CLASS_SHAMAN && player->GetMapId() == 2175 &&
+        player->GetQuestStatus(ExilesShamanQuest(player)) == QUEST_STATUS_INCOMPLETE &&
+        player->GetQuestObjectiveData(ExilesShamanQuest(player), player->GetTeam() == ALLIANCE ? 395317 : 397336) > 0;
+}
+
+static void PrepareExilesWolves(Player* player)
+{
+    if (!ExilesShamanSight(player) || !player->IsAlive())
+        return;
+    player->CastSpell(player, 317719, true);
+    uint32 rescued = std::clamp(player->GetQuestObjectiveData(ExilesShamanQuest(player),
+        player->GetTeam() == ALLIANCE ? 395318 : 397337), 0, 3);
+    std::list<Creature*> wolves;
+    player->GetCreatureListWithEntryInGrid(wolves, 163338, 500.0f);
+    uint32 existing = 0;
+    for (Creature* wolf : wolves)
+        if (wolf->GetPrivateObjectOwner() == player->GetGUID())
+            ++existing;
+    static constexpr Position positions[] = {
+        {121.40654f, -2358.1499f, 94.07265f, 0.0f},
+        {243.13139f, -2385.19995f, 84.60995f, 0.0f},
+        {288.21466f, -2391.9624f, 87.94437f, 0.0f}
+    };
+    for (uint32 i = rescued + existing; i < 3; ++i)
+        player->SummonCreature(163338, positions[i], TEMPSUMMON_TIMED_DESPAWN, 10min, 0, 0, player->GetGUID());
+}
+
+struct npc_exiles_shaman_ghost : public ScriptedAI
+{
+    npc_exiles_shaman_ghost(Creature* creature) : ScriptedAI(creature) { }
+    bool OnGossipHello(Player* player) override { PrepareExilesWolves(player); return false; }
+};
+
+struct npc_exiles_captured_wolf : public ScriptedAI
+{
+    npc_exiles_captured_wolf(Creature* creature) : ScriptedAI(creature) { }
+    bool _released = false;
+    uint32 _checkTimer = 1000;
+    void JustAppeared() override { me->SetReactState(REACT_PASSIVE); me->SetImmuneToNPC(true); }
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*type*/, SpellInfo const* /*spell*/) override { damage = 0; }
+    bool OnGossipHello(Player* player) override
+    {
+        if (!_released && ExilesShamanSight(player) && player->IsAlive() && player->HasAura(317719) &&
+            me->GetPrivateObjectOwner() == player->GetGUID() && me->InSamePhase(player) &&
+            me->IsWithinDistInMap(player, INTERACTION_DISTANCE))
+        {
+            _released = true;
+            player->KilledMonsterCredit(163338, me->GetGUID());
+            me->GetMotionMaster()->MoveFollow(player, 2.0f, 0.0f);
+            me->DespawnOrUnsummon(2s);
+        }
+        return true;
+    }
+    void UpdateAI(uint32 diff) override
+    {
+        if (_checkTimer > diff) { _checkTimer -= diff; return; }
+        _checkTimer = 1000;
+        Player* owner = ObjectAccessor::FindPlayer(me->GetPrivateObjectOwner());
+        if (!owner || !ExilesShamanSight(owner))
+            me->DespawnOrUnsummon();
+    }
+};
+
+struct go_exiles_shaman_campfire : public GameObjectAI
+{
+    go_exiles_shaman_campfire(GameObject* go) : GameObjectAI(go) { }
+    bool _startingCast = false;
+    bool OnGossipHello(Player* player) override
+    {
+        if (_startingCast || player->HasUnitState(UNIT_STATE_CASTING))
+            return true;
+        if (player->GetClass() == CLASS_SHAMAN && player->IsAlive() && player->GetMapId() == 2175 &&
+            me->InSamePhase(player) && me->IsWithinDistInMap(player, INTERACTION_DISTANCE) &&
+            player->GetQuestStatus(ExilesShamanQuest(player)) == QUEST_STATUS_INCOMPLETE && player->HasItemCount(174968, 4))
+        {
+            _startingCast = true;
+            player->CastSpell(me, 331619, false);
+            _startingCast = false;
+        }
+        return true;
+    }
+};
+
+class spell_exiles_burn_blossoms : public SpellScript
+{
+    void OnHit()
+    {
+        Player* player = GetCaster()->ToPlayer();
+        GameObject* fire = GetHitGObj();
+        if (!player || !fire || fire->GetEntry() != 342365 || player->GetClass() != CLASS_SHAMAN ||
+            !player->IsAlive() || player->GetMapId() != 2175 || !player->HasItemCount(174968, 4) ||
+            player->GetQuestStatus(ExilesShamanQuest(player)) != QUEST_STATUS_INCOMPLETE)
+            return;
+        // Keep the four quest items until normal turn-in removes them.
+        player->KillCreditGO(342365, fire->GetGUID());
+        PrepareExilesWolves(player);
+    }
+    void Register() override { AfterHit += SpellHitFn(spell_exiles_burn_blossoms::OnHit); }
+};
+
+class player_exiles_shaman_sight : public PlayerScript
+{
+public:
+    player_exiles_shaman_sight() : PlayerScript("player_exiles_shaman_sight") { }
+    void OnLogin(Player* player, bool /*first*/) override { Refresh(player); }
+    void OnMapChanged(Player* player) override { Refresh(player); }
+private:
+    static void Refresh(Player* player)
+    {
+        if (ExilesShamanSight(player))
+            player->CastSpell(player, 317719, true);
+        else
+            player->RemoveAurasDueToSpell(317719);
+    }
+};
+
+class quest_exiles_shaman_duty : public QuestScript
+{
+public:
+    quest_exiles_shaman_duty() : QuestScript("quest_exiles_shaman_duty") { }
+    void OnQuestStatusChange(Player* player, Quest const* /*quest*/, QuestStatus /*old*/, QuestStatus status) override
+    {
+        if (status != QUEST_STATUS_INCOMPLETE)
+            player->RemoveAurasDueToSpell(317719);
+    }
+};
+
+static bool ExilesHunterTrapQuest(Player const* player)
+{
+    return player->GetClass() == CLASS_HUNTER && player->GetMapId() == 2175 &&
+        player->GetQuestStatus(player->GetTeam() == ALLIANCE ? 59356 : 59953) == QUEST_STATUS_INCOMPLETE;
+}
+
+struct npc_exiles_hunter_trap : public ScriptedAI
+{
+    npc_exiles_hunter_trap(Creature* creature) : ScriptedAI(creature) { }
+    uint32 _checkTimer = 500;
+    void JustAppeared() override { me->SetReactState(REACT_PASSIVE); me->SetImmuneToNPC(true); }
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*type*/, SpellInfo const* /*spell*/) override { damage = 0; }
+    void UpdateAI(uint32 diff) override
+    {
+        if (_checkTimer > diff) { _checkTimer -= diff; return; }
+        _checkTimer = 500;
+        TempSummon* summon = me->ToTempSummon();
+        Player* player = summon ? ObjectAccessor::FindPlayer(summon->GetSummonerGUID()) : nullptr;
+        if (!player || !player->IsAlive() || !ExilesHunterTrapQuest(player))
+        {
+            me->DespawnOrUnsummon();
+            return;
+        }
+        if (Creature* prowler = me->FindNearestCreature(164990, 3.0f, true))
+            if (!prowler->HasAura(3355) && prowler->InSamePhase(player) && !prowler->IsPet())
+            {
+                player->CastSpell(prowler, 3355, true);
+                me->DespawnOrUnsummon();
+            }
+    }
+};
+
+struct npc_exiles_stalking_prowler : public ScriptedAI
+{
+    npc_exiles_stalking_prowler(Creature* creature) : ScriptedAI(creature) { }
+    void SpellHit(WorldObject* caster, SpellInfo const* spell) override
+    {
+        Player* player = caster->ToPlayer();
+        if (spell && spell->Id == 3355 && player && player->IsAlive() && ExilesHunterTrapQuest(player) &&
+            me->HasAura(3355, player->GetGUID()) && !me->IsPet())
+            player->KilledMonsterCredit(164990, me->GetGUID());
+    }
+    void UpdateAI(uint32 /*diff*/) override { UpdateVictim(); }
+};
+
+struct npc_exiles_hunter_stable : public ScriptedAI
+{
+    npc_exiles_hunter_stable(Creature* creature) : ScriptedAI(creature) { }
+    bool OnGossipHello(Player* player) override
+    {
+        if (player->GetClass() == CLASS_HUNTER && player->IsAlive() && player->GetMapId() == 2175 &&
+            me->GetEntry() == (player->GetTeam() == ALLIANCE ? 161666u : 167215u) && me->InSamePhase(player) &&
+            me->IsWithinDistInMap(player, INTERACTION_DISTANCE) &&
+            player->GetQuestStatus(player->GetTeam() == ALLIANCE ? 60168 : 60162) == QUEST_STATUS_INCOMPLETE)
+            player->KilledMonsterCredit(me->GetEntry());
+        return false;
+    }
+};
+
+class quest_exiles_hunter_trap : public QuestScript
+{
+public:
+    quest_exiles_hunter_trap() : QuestScript("quest_exiles_hunter_trap") { }
+    void OnQuestStatusChange(Player* player, Quest const* /*quest*/, QuestStatus /*old*/, QuestStatus /*status*/) override
+    {
+        if (ExilesHunterTrapQuest(player)) player->CastSpell(player, 321163, true);
+        else player->RemoveAurasDueToSpell(321163);
+    }
+};
+
+class player_exiles_hunter_trap : public PlayerScript
+{
+public:
+    player_exiles_hunter_trap() : PlayerScript("player_exiles_hunter_trap") { }
+    void OnLogin(Player* player, bool /*first*/) override { Refresh(player); }
+    void OnMapChanged(Player* player) override { Refresh(player); }
+private:
+    static void Refresh(Player* player)
+    {
+        if (ExilesHunterTrapQuest(player)) player->CastSpell(player, 321163, true);
+        else player->RemoveAurasDueToSpell(321163);
+    }
+};
+
+struct go_exiles_druid_stone : public GameObjectAI
+{
+    go_exiles_druid_stone(GameObject* go) : GameObjectAI(go) { }
+    bool _startingCast = false;
+    bool OnGossipHello(Player* player) override
+    {
+        // Open Lock calls GameObject::Use again while resolving the spell.
+        if (_startingCast || player->HasUnitState(UNIT_STATE_CASTING))
+            return true;
+        uint32 quest = player->GetTeam() == ALLIANCE ? 59350 : 59951;
+        if (player->GetClass() == CLASS_DRUID && player->IsAlive() && !player->IsInCombat() &&
+            player->GetMapId() == 2175 && me->InSamePhase(player) && me->IsWithinDistInMap(player, INTERACTION_DISTANCE) &&
+            player->GetQuestStatus(quest) == QUEST_STATUS_INCOMPLETE)
+        {
+            _startingCast = true;
+            player->CastSpell(me, 321072, false); // Open-lock cast + native ritual credit, not click-only credit.
+            _startingCast = false;
+        }
+        return true;
     }
 };
 
@@ -7607,19 +8405,42 @@ struct npc_meredy_huntswell_ogre : public ScriptedAI
         CloseGossipMenuFor(player);
         Talk(SAY_MEREDY_OGRE_TINGLE, player);
         me->CastSpell(player, SPELL_OGRE_TRANSFORMATION_CHANNEL);
+        return true;
+    }
+};
+
+// 313583 - The captured aura lasts six seconds. Interrupted channels must not
+// award the disguise credit or summon prisoners.
+class spell_exiles_ogre_transformation : public AuraScript
+{
+    void OnRemove(AuraEffect const* /*effect*/, AuraEffectHandleModes /*mode*/)
+    {
+        if (GetTargetApplication()->GetRemoveMode() != AURA_REMOVE_BY_EXPIRE)
+            return;
+        Player* player = GetTarget()->ToPlayer();
+        Unit* caster = GetCaster();
+        if (!player || !caster || caster->GetEntry() != NPC_MEREDY_HUNTSWELL_OGRE
+            || player->GetMapId() != 2175 || !player->IsAlive() || !IsOgreDisguiseQuestIncomplete(player))
+            return;
+
         player->CastSpell(player, SPELL_OGRE_TRANSFORMATION_AURA, true);
-        player->KilledMonsterCredit(me->GetEntry());
+        player->KilledMonsterCredit(NPC_MEREDY_HUNTSWELL_OGRE);
         player->CastSpell(player, SPELL_UPDATE_PHASE_SHIFT, true);
 
         // Sniff 19:22:44 CreateObject2: Jaina 245399, Henry 153565, Garrick 153566.
         // Horde prisoner entries are not in the Alliance sniff; do not invent summons.
         if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES) == QUEST_STATUS_INCOMPLETE)
         {
-            player->SummonCreature(NPC_PRISONER_JAINA, Position(317.25522f, -2172.2432f, 106.14853f, 0.81894f), TEMPSUMMON_TIMED_DESPAWN, 30min);
-            player->SummonCreature(NPC_PRISONER_HENRY, Position(321.32812f, -2173.9878f, 106.42307f, 0.35142f), TEMPSUMMON_TIMED_DESPAWN, 30min);
-            player->SummonCreature(NPC_PRISONER_CAPTAIN_GARRICK, Position(323.2691f, -2174.8298f, 106.41644f, 0.56557f), TEMPSUMMON_TIMED_DESPAWN, 30min);
+            DespawnOgrePrisoners(player);
+            player->SummonCreature(NPC_PRISONER_JAINA, Position(317.25522f, -2172.2432f, 106.14853f, 0.81894f), TEMPSUMMON_TIMED_DESPAWN, 30min, 0, 0, player->GetGUID());
+            player->SummonCreature(NPC_PRISONER_HENRY, Position(321.32812f, -2173.9878f, 106.42307f, 0.35142f), TEMPSUMMON_TIMED_DESPAWN, 30min, 0, 0, player->GetGUID());
+            player->SummonCreature(NPC_PRISONER_CAPTAIN_GARRICK, Position(323.2691f, -2174.8298f, 106.41644f, 0.56557f), TEMPSUMMON_TIMED_DESPAWN, 30min, 0, 0, player->GetGUID());
         }
-        return true;
+    }
+
+    void Register() override
+    {
+        AfterEffectRemove += AuraEffectRemoveFn(spell_exiles_ogre_transformation::OnRemove, EFFECT_0, SPELL_AURA_ANY, AURA_EFFECT_HANDLE_REAL);
     }
 };
 
@@ -7720,6 +8541,16 @@ struct npc_ogre_disguise_prisoner : public ScriptedAI
             me->CastSpell(owner, SPELL_PRISONER_CHAIN, true);
             me->GetMotionMaster()->MoveFollow(owner, 3.0f, OgrePrisonerFollowAngle(me->GetEntry()), {}, true);
         }
+    }
+
+    void UpdateAI(uint32 /*diff*/) override
+    {
+        if (!me->IsPrivateObject())
+            return;
+        Player* player = ObjectAccessor::GetPlayer(*me, me->GetPrivateObjectOwner());
+        if (!player || !player->IsAlive() || !IsOgreDisguiseQuestIncomplete(player)
+            || !player->HasAura(SPELL_OGRE_TRANSFORMATION_AURA))
+            me->DespawnOrUnsummon();
     }
 };
 
@@ -7867,12 +8698,15 @@ public:
 
     void OnTextEmote(Player* player, uint32 textEmote, uint32 /*emoteNum*/, ObjectGuid guid) override
     {
-        if (!IsOgreDisguiseQuestIncomplete(player))
+        if (player->GetMapId() != 2175 || !IsOgreDisguiseQuestIncomplete(player)
+            || !player->HasAura(SPELL_OGRE_TRANSFORMATION_AURA))
             return;
 
         if (textEmote == TEXT_EMOTE_WAVE)
         {
-            if (guid.GetEntry() != NPC_GORGROTH)
+            Creature* gorgroth = ObjectAccessor::GetCreature(*player, guid);
+            if (!gorgroth || gorgroth->GetEntry() != NPC_GORGROTH
+                || !player->IsWithinDistInMap(gorgroth, 30.0f))
                 return;
             if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES) == QUEST_STATUS_INCOMPLETE)
                 player->UpdateQuestObjectiveProgress(QUEST_OBJECTIVE_CRITERIA_TREE, CRITERIA_TREE_WAVE_GORGROTH, 1);
@@ -7881,6 +8715,12 @@ public:
         }
         else if (textEmote == TEXT_EMOTE_DANCE)
         {
+            bool inCookingArea = false;
+            for (AreaTrigger const* areaTrigger : player->GetInsideAreaTriggers())
+                if (areaTrigger->GetEntry() == AREATRIGGER_OGRE_COOKING)
+                    inCookingArea = true;
+            if (!inCookingArea)
+                return;
             if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES) == QUEST_STATUS_INCOMPLETE)
                 player->UpdateQuestObjectiveProgress(QUEST_OBJECTIVE_CRITERIA_TREE, CRITERIA_TREE_DANCE_COOKING, 1);
             if (player->GetQuestStatus(QUEST_RIGHT_BENEATH_THEIR_EYES_H) == QUEST_STATUS_INCOMPLETE)
@@ -7891,6 +8731,32 @@ public:
 
 void AddSC_zone_exiles_reach()
 {
+    RegisterCreatureAI(npc_exiles_priest_introduction);
+    RegisterCreatureAI(npc_exiles_recruit_resurrection);
+    new quest_exiles_resurrect_recruits();
+    new player_exiles_recruit_override();
+    RegisterGameObjectAI(go_exiles_druid_stone);
+    RegisterCreatureAI(npc_exiles_hjalmar_training);
+    RegisterCreatureAI(npc_exiles_hjalmar_questgiver);
+    RegisterCreatureAI(npc_exiles_monk_mentor);
+    RegisterSpellScript(spell_exiles_monk_meditation);
+    RegisterCreatureAI(npc_exiles_herbert_mage);
+    RegisterCreatureAI(npc_exiles_paladin_ghost);
+    RegisterGameObjectAI(go_exiles_necrotic_altar);
+    RegisterCreatureAI(npc_exiles_class_corpse);
+    RegisterCreatureAI(npc_exiles_gutgruk);
+    RegisterSpellAndAuraScriptPair(spell_exiles_voidwalker_ritual, spell_exiles_voidwalker_ritual_aura);
+    RegisterCreatureAI(npc_exiles_shaman_ghost);
+    RegisterCreatureAI(npc_exiles_captured_wolf);
+    RegisterGameObjectAI(go_exiles_shaman_campfire);
+    RegisterSpellScript(spell_exiles_burn_blossoms);
+    new player_exiles_shaman_sight();
+    new quest_exiles_shaman_duty();
+    RegisterCreatureAI(npc_exiles_hunter_trap);
+    RegisterCreatureAI(npc_exiles_stalking_prowler);
+    RegisterCreatureAI(npc_exiles_hunter_stable);
+    new quest_exiles_hunter_trap();
+    new player_exiles_hunter_trap();
     // Ship
     RegisterSpellScript(spell_attention_exiles_reach_tutorial);
     new q59926_warming_up();
@@ -8025,6 +8891,7 @@ void AddSC_zone_exiles_reach()
     RegisterCreatureAI(npc_meredy_huntswell_camp);
     RegisterCreatureAI(npc_alliance_mage_polymorph_dummy);
     RegisterCreatureAI(npc_meredy_huntswell_ogre);
+    RegisterSpellScript(spell_exiles_ogre_transformation);
     RegisterCreatureAI(npc_kalecgos_exiles_reach);
     RegisterCreatureAI(npc_kalecgos_darkmaul_leave);
     RegisterCreatureAI(npc_quartermaster_repair_exiles);

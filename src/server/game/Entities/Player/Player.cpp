@@ -423,15 +423,15 @@ bool Player::Create(ObjectGuid::LowType guidlow, WorldPackets::Character::Charac
         return false;
     }
 
-    // Midnight realm: always Exile's Reach when NPE coords exist. Death Knights and Demon
-    // Hunters keep their class intro even if a leftover npe_map row is present.
-    bool const forceNPE = info->createPositionNPE.has_value()
+    // Honor the client's starting-zone choice when NPE coordinates are available.
+    // Death Knights and Demon Hunters retain their dedicated class introductions.
+    bool const useNPE = createInfo->UseNPE && info->createPositionNPE.has_value()
         && createInfo->Class != CLASS_DEATH_KNIGHT
         && createInfo->Class != CLASS_DEMON_HUNTER;
-    PlayerInfo::CreatePosition const& position = forceNPE ? *info->createPositionNPE : info->createPosition;
+    PlayerInfo::CreatePosition const& position = useNPE ? *info->createPositionNPE : info->createPosition;
 
     m_createTime = GameTime::GetGameTime();
-    m_createMode = forceNPE ? PlayerCreateMode::NPE : PlayerCreateMode::Normal;
+    m_createMode = useNPE ? PlayerCreateMode::NPE : PlayerCreateMode::Normal;
 
     Relocate(position.Loc);
 

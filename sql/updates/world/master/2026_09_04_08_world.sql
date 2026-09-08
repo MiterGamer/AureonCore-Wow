@@ -44,13 +44,13 @@ INSERT INTO `creature`
  `npcflag`, `unit_flags`, `unit_flags2`, `unit_flags3`, `ScriptName`, `StringId`, `VerifiedBuild`)
 VALUES
 -- 245394 camp Garrick (17:02:56, npcflag 2, area 10529)
-(8000930, 245394, 2175, 10424, 10529, '0', 0, 13794, 0, -1, 0, 0, 179.73611, -2285.6997, 81.931755, 0.9936105, 120, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, '', 'q_camp_garrick_245394', 0),
+(8000930, 245394, 2175, 10424, 10529, '0', 0, 13794, 0, -1, 0, 0, 179.73611, -2285.6997, 81.931755, 0.9936105, 120, 0, 0, 100, 0, NULL, NULL, NULL, NULL, '', 'q_camp_garrick_245394', 0),
 -- 153211 ritual Meredy (17:08:15, npcflag 1)
-(8000931, 153211, 2175, 10424, 10528, '0', 0, 13811, 0, -1, 0, 0, 495.41147, -2354.5642, 163.20782, 4.6382723, 120, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, '', 'q55763_meredy_ritual', 0),
+(8000931, 153211, 2175, 10424, 10528, '0', 0, 13811, 0, -1, 0, 0, 495.41147, -2354.5642, 163.20782, 4.6382723, 120, 0, 0, 100, 0, NULL, NULL, NULL, NULL, '', 'q55763_meredy_ritual', 0),
 -- 153964 Bloodbeak hover (17:05:37, PlayHoverAnim, DisableGravity)
-(8000932, 153964, 2175, 10424, 10528, '0', 0, 13811, 0, -1, 0, 0, 490.97025, -2423.2625, 174.13655, 1.5158213, 120, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, '', 'q55763_bloodbeak', 0),
+(8000932, 153964, 2175, 10424, 10528, '0', 0, 13811, 0, -1, 0, 0, 490.97025, -2423.2625, 174.13655, 1.5158213, 120, 0, 0, 100, 0, NULL, NULL, NULL, NULL, '', 'q55763_bloodbeak', 0),
 -- 156882 roost Meredy after rescue (17:11:29, npcflag 2)
-(8000933, 156882, 2175, 10424, 10528, '0', 0, 13811, 0, -1, 0, 0, 393.21875, -2442.9307, 125.913445, 2.7876916, 120, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, '', 'q55763_meredy_roost', 0);
+(8000933, 156882, 2175, 10424, 10528, '0', 0, 13811, 0, -1, 0, 0, 393.21875, -2442.9307, 125.913445, 2.7876916, 120, 0, 0, 100, 0, NULL, NULL, NULL, NULL, '', 'q55763_meredy_roost', 0);
 
 -- Sniffed camp Jaina 156807 is ambient (npcflag 0), not the 12.1 questgiver.
 UPDATE `creature` SET `npcflag` = 0 WHERE `guid` = 8000044 AND `id` = 156807;

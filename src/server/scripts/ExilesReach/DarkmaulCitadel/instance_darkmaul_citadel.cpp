@@ -65,38 +65,38 @@ public:
         {
             InstanceScript::OnCreatureCreate(creature);
             if (creature->GetEntry() == NPC_DARKMAUL_SHADOWCALLER)
-                _shadowcallers.insert(creature->GetGUID());
+                if (!creature->IsAlive())
+                    RecordShadowcallerDeath(creature->GetGUID());
         }
 
-        void OnCreatureRemove(Creature* creature) override
+        void OnGameObjectCreate(GameObject* object) override
         {
-            if (creature->GetEntry() == NPC_DARKMAUL_SHADOWCALLER)
-                _shadowcallers.erase(creature->GetGUID());
-            InstanceScript::OnCreatureRemove(creature);
+            InstanceScript::OnGameObjectCreate(object);
+            if (object->GetEntry() == GO_SHADOWY_DOOR && _barrierCleared)
+                HandleGameObject(object->GetGUID(), true, object);
         }
 
         void OnUnitDeath(Unit* unit) override
         {
             InstanceScript::OnUnitDeath(unit);
             if (unit && unit->GetEntry() == NPC_DARKMAUL_SHADOWCALLER)
-                TryOpenShadowyDoor();
+                RecordShadowcallerDeath(unit->GetGUID());
         }
 
     private:
-        GuidSet _shadowcallers;
+        GuidSet _deadShadowcallers;
+        PersistentInstanceScriptValue<bool> _barrierCleared{ *this, "ShadowBarrierCleared", false };
 
         // Wiki Font of Shadows: all three Darkmaul Shadowcallers 156821 channel the orb;
         // when they die the shadowy barrier 334578 drops (sniff CreateObject on map 2236).
-        void TryOpenShadowyDoor()
+        void RecordShadowcallerDeath(ObjectGuid guid)
         {
-            if (_shadowcallers.empty())
+            _deadShadowcallers.insert(guid);
+            // Unloaded living casters must not be mistaken for dead casters.
+            if (_deadShadowcallers.size() < 3)
                 return;
-
-            for (ObjectGuid const& guid : _shadowcallers)
-                if (Creature* shadowcaller = instance->GetCreature(guid))
-                    if (shadowcaller->IsAlive())
-                        return;
-
+            if (!_barrierCleared)
+                _barrierCleared = true;
             if (GameObject* door = GetGameObject(DATA_SHADOWY_DOOR))
                 HandleGameObject(door->GetGUID(), true, door);
         }

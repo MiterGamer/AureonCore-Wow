@@ -8,9 +8,9 @@ SET `spawntimesecs` = 120
 WHERE `map` = 2175
   AND `id` = 156900;
 
-DELETE FROM `tc_characters`.`respawn`
-WHERE `type` = 0
-  AND `spawnId` IN (SELECT `guid` FROM `creature` WHERE `map` = 2175 AND `id` = 156900);
+-- Persisted character respawns are deliberately not modified by a world
+-- migration: the characters database name is configurable. Existing timers
+-- expire normally; subsequent deaths use the corrected 120 second delay.
 
 DELETE FROM `spawn_tracking`
 WHERE `SpawnTrackingId` = 1825492;

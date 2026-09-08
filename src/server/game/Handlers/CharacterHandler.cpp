@@ -430,14 +430,13 @@ void WorldSession::HandleCharEnum(CharacterDatabaseQueryHolder const& holder)
     charEnum.Success = true;
     charEnum.IsDeletedCharacters = static_cast<EnumCharactersQueryHolder const&>(holder).IsDeletedCharacters();
     charEnum.ClassDisableMask = sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_CLASSMASK);
-    // Midnight NPE: hide the Exile's Reach vs racial-legacy starting-zone picker for every
-    // account, not only the first character. Do not set ForceCharacterTemplate (that hides ER).
-    // Do not flip IsNewcomerChatCompleted — that blocks allied races / hero classes.
     if (!charEnum.IsDeletedCharacters)
-        charEnum.IsRestrictedNewPlayer = true;
-
-    if (!charEnum.IsDeletedCharacters)
+    {
+        // Removing IsRestrictedNewPlayer alone does not bypass the client's beginner restrictions.
+        // Allow eligible normal characters to choose between NPE and their racial introduction.
+        charEnum.IgnoreNewPlayerRestrictions = true;
         _legitCharacters.clear();
+    }
 
     std::unordered_map<ObjectGuid::LowType, std::vector<UF::ChrCustomizationChoice>> customizations;
     if (PreparedQueryResult customizationsResult = holder.GetPreparedResult(EnumCharactersQueryHolder::CUSTOMIZATIONS))

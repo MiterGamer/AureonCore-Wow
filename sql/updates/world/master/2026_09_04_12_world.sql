@@ -63,7 +63,7 @@ INSERT INTO `creature`
  `spawntimesecs`, `wander_distance`, `currentwaypoint`, `curHealthPct`, `MovementType`,
  `npcflag`, `unit_flags`, `unit_flags2`, `unit_flags3`, `ScriptName`, `StringId`, `VerifiedBuild`)
 VALUES
-(8000951, 153580, 2175, 10424, 10530, '0', 0, 13839, 0, -1, 0, 0, 587.00696, -2063.2935, 159.61661, 3.5194473, 120, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, '', 'q55981_gorgroth', 0);
+(8000951, 153580, 2175, 10424, 10530, '0', 0, 13839, 0, -1, 0, 0, 587.00696, -2063.2935, 159.61661, 3.5194473, 120, 0, 0, 100, 0, NULL, NULL, NULL, NULL, '', 'q55981_gorgroth', 0);
 
 -- Type 19 enter-credits from sniff 19:22:57 / 19:23:11 / 19:24:07.
 DELETE FROM `areatrigger_template` WHERE `Id` IN (16996, 17000, 16893) AND `IsCustom` = 1;

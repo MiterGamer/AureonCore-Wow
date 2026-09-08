@@ -17,6 +17,7 @@
 
 #include "Creature.h"
 #include "InstanceScript.h"
+#include "Map.h"
 #include "MotionMaster.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
@@ -62,12 +63,14 @@ Position const DecayingCorpsePositions[] =
 // 156814 - Gor'groth
 struct boss_gorgroth : public ScriptedAI
 {
-    boss_gorgroth(Creature* creature) : ScriptedAI(creature), instance(creature->GetInstanceScript()), _introDone(false), _sacrificed(false) { }
+    boss_gorgroth(Creature* creature) : ScriptedAI(creature), instance(creature->GetInstanceScript()), _summons(me), _introDone(false), _sacrificed(false) { }
 
     void Reset() override
     {
         _events.Reset();
         _scheduler.CancelAll();
+        _summons.DespawnAll();
+        _introDone = false;
         _sacrificed = false;
 
         if (instance && instance->GetBossState(DATA_RAVNYR) == DONE)
@@ -95,6 +98,10 @@ struct boss_gorgroth : public ScriptedAI
 
         _sacrificed = false;
         _introDone = false;
+        me->InterruptNonMeleeSpells(true);
+        _EnterEvadeMode(EvadeReason::Other);
+        me->SetFullHealth();
+        me->NearTeleportTo(me->GetHomePosition());
         me->SetVisible(true);
         me->SetUninteractible(false);
         me->SetImmuneToPC(true);
@@ -118,6 +125,9 @@ struct boss_gorgroth : public ScriptedAI
 
         StartIntro();
     }
+
+    void JustSummoned(Creature* summon) override { _summons.Summon(summon); }
+    void SummonedCreatureDespawn(Creature* summon) override { _summons.Despawn(summon); }
 
     void JustEngagedWith(Unit* /*who*/) override
     {
@@ -170,6 +180,20 @@ struct boss_gorgroth : public ScriptedAI
 
     void UpdateAI(uint32 diff) override
     {
+        if (me->IsInCombat() && !_sacrificed && instance)
+        {
+            bool livingPlayer = false;
+            instance->instance->DoOnPlayers([&](Player* player)
+            {
+                if (player->IsAlive() && me->IsWithinDistInMap(player, 100.0f))
+                    livingPlayer = true;
+            });
+            if (!livingPlayer)
+            {
+                EnterEvadeMode(EvadeReason::Other);
+                return;
+            }
+        }
         _scheduler.Update(diff);
 
         if (!_introDone && !me->IsInCombat())
@@ -217,11 +241,14 @@ private:
     InstanceScript* const instance;
     EventMap _events;
     TaskScheduler _scheduler;
+    SummonList _summons;
     bool _introDone;
     bool _sacrificed;
 
     void StartIntro()
     {
+        if (!instance || instance->GetBossState(DATA_TUNK) != DONE || instance->GetBossState(DATA_RAVNYR) == DONE)
+            return;
         _introDone = true;
         DoCastSelf(SPELL_SUMMON_GHOULS);
 
@@ -238,6 +265,12 @@ private:
 
     void Sacrifice()
     {
+        Creature* ravnyr = instance ? instance->GetCreature(DATA_RAVNYR) : nullptr;
+        if (!ravnyr || !ravnyr->IsAIEnabled())
+        {
+            EnterEvadeMode(EvadeReason::Other);
+            return;
+        }
         _sacrificed = true;
         _events.Reset();
         me->InterruptNonMeleeSpells(false);
@@ -251,11 +284,8 @@ private:
 
         Talk(SAY_SACRIFICE);
 
-        if (Creature* ravnyr = instance ? instance->GetCreature(DATA_RAVNYR) : nullptr)
-        {
-            DoCast(ravnyr, SPELL_FINAL_SACRIFICE, true);
-            ravnyr->AI()->DoAction(ACTION_GORGROTH_SACRIFICED);
-        }
+        DoCast(ravnyr, SPELL_FINAL_SACRIFICE, true);
+        ravnyr->AI()->DoAction(ACTION_GORGROTH_SACRIFICED);
 
         _scheduler.Schedule(14s, [this](TaskContext const&)
         {
