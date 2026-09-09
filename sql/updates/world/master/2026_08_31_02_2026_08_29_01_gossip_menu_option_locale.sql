@@ -2,7 +2,7 @@
 -- Apply AFTER 2026_08_29_00_gossip_menu_option_locale_pk.sql
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS=0;
-DELETE FROM \gossip_menu_option_locale\;
+DELETE FROM `gossip_menu_option_locale`;
 
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;

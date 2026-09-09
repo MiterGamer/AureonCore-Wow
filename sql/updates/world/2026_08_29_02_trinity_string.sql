@@ -1,7 +1,6 @@
--- Update: trinity_string locales (en default + loc1-8)
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS=0;
-DELETE FROM \	rinity_string\;
+DELETE FROM `trinity_string`;
 
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;

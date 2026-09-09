@@ -96,16 +96,16 @@ VALUES
 -- Heal + Murloc Mania conversations: actor 0 = NPC spawn, actor 1 = player
 DELETE FROM `world`.`conversation_actors` WHERE `ConversationId` IN (11685, 12127, 12128, 12043, 14432);
 INSERT INTO `world`.`conversation_actors`
-(`ConversationId`, `ConversationActorId`, `ConversationActorGuid`, `ConversationActorNearId`,
+(`ConversationId`, `ConversationActorId`, `ConversationActorGuid`,
  `Idx`, `CreatureId`, `CreatureDisplayInfoId`, `NoActorObject`, `ActivePlayerObject`, `VerifiedBuild`)
 VALUES
-(11685, 0, 42226, 0, 0, 0, 0, 0, 0, 0),
-(11685, 0,     0, 0, 1, 0, 0, 0, 1, 0),
-(12127, 0, 42225, 0, 0, 0, 0, 0, 0, 0),
-(12127, 0,     0, 0, 1, 0, 0, 0, 1, 0),
-(12128, 0, 42227, 0, 0, 0, 0, 0, 0, 0),
-(12128, 0,     0, 0, 1, 0, 0, 0, 1, 0),
-(12043, 0, 42178, 0, 0, 0, 0, 0, 0, 0),
-(12043, 0,     0, 0, 1, 0, 0, 0, 1, 0),
-(14432, 0, 42179, 0, 0, 0, 0, 0, 0, 0),
-(14432, 0,     0, 0, 1, 0, 0, 0, 1, 0);
+(11685, 0, 42226, 0, 0, 0, 0, 0, 0),
+(11685, 0,     0, 1, 0, 0, 0, 1, 0),
+(12127, 0, 42225, 0, 0, 0, 0, 0, 0),
+(12127, 0,     0, 1, 0, 0, 0, 1, 0),
+(12128, 0, 42227, 0, 0, 0, 0, 0, 0),
+(12128, 0,     0, 1, 0, 0, 0, 1, 0),
+(12043, 0, 42178, 0, 0, 0, 0, 0, 0),
+(12043, 0,     0, 1, 0, 0, 0, 1, 0),
+(14432, 0, 42179, 0, 0, 0, 0, 0, 0),
+(14432, 0,     0, 1, 0, 0, 0, 1, 0);

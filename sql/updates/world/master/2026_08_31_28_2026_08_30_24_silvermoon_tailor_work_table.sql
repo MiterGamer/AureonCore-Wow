@@ -6,9 +6,9 @@ INSERT INTO `gameobject`
 (`guid`,`id`,`map`,`zoneId`,`areaId`,`spawnDifficulties`,`phaseUseFlags`,`PhaseId`,`PhaseGroup`,
  `terrainSwapMap`,`position_x`,`position_y`,`position_z`,`orientation`,
  `rotation0`,`rotation1`,`rotation2`,`rotation3`,`spawntimesecs`,`animprogress`,`state`,
- `isActive`,`ScriptName`,`StringId`,`VerifiedBuild`)
+ `ScriptName`,`StringId`,`VerifiedBuild`)
 VALUES
 (220458,556766,0,15969,16079,'0',0,0,0,-1,
  8761.5,-4690.8,23.458,1.11078,
  0,0,0.527076,0.849814,120,255,1,
- 0,'',NULL,69497);
+ '',NULL,69497);
