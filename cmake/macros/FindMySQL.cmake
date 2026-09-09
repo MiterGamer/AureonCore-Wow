@@ -72,6 +72,15 @@ if(UNIX)
     /usr/bin/
   )
 
+  if(NOT MYSQL_CONFIG)
+    find_program(MYSQL_CONFIG mariadb_config
+      ${MYSQL_CONFIG_PREFER_PATH}
+      /usr/local/mysql/bin/
+      /usr/local/bin/
+      /usr/bin/
+    )
+  endif()
+
   if(MYSQL_CONFIG)
     message(STATUS "Using mysql-config: ${MYSQL_CONFIG}")
     # set INCLUDE_DIR
@@ -108,7 +117,11 @@ if(UNIX)
 
   else(MYSQL_CONFIG)
     set(MYSQL_ADD_LIBRARIES "")
-    list(APPEND MYSQL_ADD_LIBRARIES "mysqlclient_r")
+    if(WIN32)
+      list(APPEND MYSQL_ADD_LIBRARIES "libmariadb")
+    else()
+      list(APPEND MYSQL_ADD_LIBRARIES "mysqlclient_r")
+    endif(WIN32)
   endif(MYSQL_CONFIG)
 endif(UNIX)
 
