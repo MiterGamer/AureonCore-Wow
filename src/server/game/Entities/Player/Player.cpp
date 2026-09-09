@@ -4650,8 +4650,8 @@ void Player::DurabilityRepairAll(bool takeCost, float discountMod, bool guildBan
     uint8 inventoryEnd = INVENTORY_SLOT_ITEM_START + GetInventorySlotCount();
     for (uint8 i = EQUIPMENT_SLOT_START; i < inventoryEnd; i++)
         if (Item* item = GetItemByPos(((INVENTORY_SLOT_BAG_0 << 8) | i)))
-            if (uint64 cost = item->CalculateDurabilityRepairCost(discountMod))
-                itemRepairCostStore.push_back(std::make_pair(item, cost));
+            if (item->m_itemData->Durability < item->m_itemData->MaxDurability)
+                itemRepairCostStore.emplace_back(item, item->CalculateDurabilityRepairCost(discountMod));
 
     // bank, buyback and keys not repaired
 
@@ -4659,8 +4659,8 @@ void Player::DurabilityRepairAll(bool takeCost, float discountMod, bool guildBan
     for (uint8 j = INVENTORY_SLOT_BAG_START; j < INVENTORY_SLOT_BAG_END; j++)
         for (uint8 i = 0; i < MAX_BAG_SIZE; i++)
             if (Item* item = GetItemByPos(((j << 8) | i)))
-                if (uint64 cost = item->CalculateDurabilityRepairCost(discountMod))
-                    itemRepairCostStore.push_back(std::make_pair(item, cost));
+                if (item->m_itemData->Durability < item->m_itemData->MaxDurability)
+                    itemRepairCostStore.emplace_back(item, item->CalculateDurabilityRepairCost(discountMod));
 
     // Handling a free repair case - just repair every item without taking cost.
     if (!takeCost)

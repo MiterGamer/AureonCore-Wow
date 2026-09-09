@@ -1,5 +1,86 @@
 # Changelog - 2026-09-06
 
+## Version 0.2.4 — 8 September 2026 at 21:08 CEST
+
+- Fixed Meredy's personal rescue ending: release ritual effects and move her toward the roost entrance instead of deleting the personal actor immediately on completion.
+- Hide the public captive only for players who completed the quest; unfinished players retain their own view. Personal clones remain owner-only.
+- Release build passed; migration 24 applied remotely with rollback and repeat-import checks. New worldserver required; two-player gameplay verification remains pending.
+
+Details: [Meredy personal exit](doc/MEREDY_PERSONAL_EXIT_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 20:30 CEST
+
+- Compared The Rescue of Meredy Huntswell (55763) with the retail capture: verified gossip entry, timed Bloodbeak appearance and boss-kill objective.
+- Removed the obsolete permanent Bloodbeak fallback spawn that duplicated the scripted event boss. Preserved quest and script bindings.
+- Migration 23 applied remotely with a row backup, transaction rollback and repeat-import checks. Restart worldserver; no new executable required. Full client sequence remains unverified.
+
+Details: [Meredy rescue review](doc/MEREDY_REVIEW_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 20:12 CEST
+
+- Disabled unintended melee attacks from four invisible helpers around Lightspawn during Freeing the Light, using the existing passive NullCreatureAI.
+- Preserved spawns, phases, faction and quest data. Migration 22 applied remotely; exact rollback, AI-only change and repeat-import checks passed.
+- Restart worldserver to activate the change for existing helpers. No new executable required; live quest verification remains pending.
+
+Details: [Invisible helper repair](doc/INVISBUNNY_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 20:00 CEST
+
+- Added explicit cleanup after the Scout-o-Matic/Choppy Booster return flight; missing construction conversations no longer block miniature-drone cleanup.
+- Restored Ralia Dreamchaser's descent to the cave floor and movement to her waiting position using retail sniff coordinates and timing.
+- Fixed Repair All skipping damaged items with zero calculated repair cost. Six isolated regression assertions passed; Release build successful.
+- Re-Sizer mouse activation remains under investigation; existing item/spell bindings were verified. In-game verification is pending for the implemented changes.
+
+Details: [Exile's Reach follow-up](doc/EXILES_FOLLOWUP_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 19:48 CEST
+
+- Adjusted the Lindie/Cork rescue in Down with the Quilboar: preserve visibility in the quest-completion phase and prevent duplicate release actions.
+- Retained the rescue jump and spoken line; replace the short fixed despawn with arrival-based cleanup and a navigation timeout.
+- Release build and executable startup/version checks passed; installed the new worldserver and matching runtime libraries locally with a backup. In-game rescue verification remains pending.
+- The subsequent story conversation still requires missing conversation-line data and trigger binding; this patch does not restore that separate dialogue.
+
+Details: [Briarpatch rescue](doc/BRIARPATCH_RESCUE_0.2.4.md).
+
+## Version 0.2.4 — 8 September 2026 at 19:05 CEST
+
+- Added four missing named equipment drops for Great Father Arctikus, Frostmane Novice and the current Frostmane Seer.
+- Used documented public retail sample rates as estimates; preserved all existing loot and difficulty mappings. No obsolete quest loot or Classic drop-rate tables imported.
+- Migration 21 applied remotely; transaction rollback and repeat-import checks passed. Complete loot pools and in-game generation remain unverified.
+
+Details: [Loot restoration](doc/LOOT_REPAIR_0.2.4.md).
+
+
+## Version 0.2.4 — 8 September 2026 at 18:54 CEST
+
+- Restored missing stationary quest-giver spawns for Magistrix Erona, Lanthan Perilon and Proenitus.
+- Preserved their existing templates, scripts, ten quest-start links and eight quest-end links.
+- Used legacy position references corroborated by public locations and local build-69497 terrain; exact retail phasing and gameplay remain unverified. Deferred Megelon pending model-collision height validation.
+- Applied migration 20 remotely after transaction rollback, duplicate-prevention and exact template/relation checks. Restart worldserver; no new executable required.
+
+Details: [Starting-area NPC restoration](doc/STARTING_NPCS_0.2.4.md).
+
+
+## Version 0.2.3 — 8 September 2026 at 18:22 CEST
+
+- Corrected four all-zero object rotations using the existing loader orientation fallback (migration 19, applied remotely).
+- Exact transaction rollback, normalized rotation checks and repeat import passed. No gameplay content or NPC text was invented; large missing-content groups remain unresolved.
+
+
+## Version 0.2.3 — 8 September 2026 at 18:12 CEST
+
+- Restored four missing initiating area-trigger actions for quest 10085 from the original TrinityCore script. Existing linked credits could not trigger without them.
+- Preserved quest conditions and credit rows; verified dependencies, exact transaction rollback and repeat import. Applied migration 18 remotely.
+- Restart worldserver and test the four quest locations. No new executable required; live gameplay validation remains pending.
+
+
+## Version 0.2.3 — September 8, 2026 at 17:59 CEST
+
+- Reviewed the new startup logs: 20,590 DB messages; the seven targeted Mist/Protector of the Frail messages are absent. Successful login is not recorded in these logs.
+- Corrected six dangling terminal area-trigger SmartAI links in migration 17, preserving direct actions and conditions. Applied remotely with backup, exact transaction rollback and repeat-import checks.
+- No binary change; restart worldserver for verification. Remaining missing content and spell rules are unresolved.
+
+
 ## Exile's Reach Quest and NPC Fixes
 
 ### Fixed
