@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AC Server Manager - Anmelden</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;background:#0d1117;color:#e6edf3;display:flex;justify-content:center;align-items:center;min-height:100vh}
+        .login-card{background:#1c2128;border:1px solid #30363d;border-radius:16px;padding:40px 32px;width:100%;max-width:400px;box-shadow:0 16px 32px rgba(0,0,0,.4)}
+        .logo{text-align:center;margin-bottom:28px}
+        .logo svg{color:#58a6ff;margin-bottom:12px}
+        .logo h1{font-size:1.3rem;background:linear-gradient(135deg,#58a6ff,#bc8cff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+        .logo p{font-size:.85rem;color:#8b949e;margin-top:4px}
+        .field{margin-bottom:16px}
+        .field label{display:block;font-size:.82rem;color:#8b949e;margin-bottom:6px}
+        .field input{width:100%;padding:11px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:.95rem;outline:none;transition:border-color .15s}
+        .field input:focus{border-color:#58a6ff;box-shadow:0 0 0 2px rgba(88,166,255,.15)}
+        .btn{width:100%;padding:12px;background:linear-gradient(135deg,#58a6ff,#bc8cff);border:none;border-radius:8px;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:opacity .15s}
+        .btn:hover{opacity:.9}.btn:active{transform:scale(.98)}
+        .err{display:none;padding:10px 14px;background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);border-radius:6px;color:#f85149;font-size:.85rem;margin-bottom:14px}
+        .err.show{display:block}
+        .hint{text-align:center;margin-top:16px;padding:10px;background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.3);border-radius:8px;font-size:.8rem;color:#d29922;display:none}
+        .hint.show{display:block}
+        .pw-req{margin-top:6px;font-size:.75rem;color:#6e7681}
+        .pw-req span{display:block;padding:1px 0}.pw-req span.ok{color:#3fb950}
+    </style>
+</head>
+<body>
+<div class="login-card">
+    <div class="logo">
+        <svg viewBox="0 0 24 24" width="44" height="44" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <h1>AC Server Manager</h1>
+        <p id="sub">Bitte anmelden</p>
+    </div>
+    <div class="err" id="err"></div>
+    <form id="frm">
+        <div class="field"><label for="user">Benutzername</label><input type="text" id="user" autocomplete="username" required></div>
+        <div class="field"><label for="pw">Passwort</label><input type="password" id="pw" autocomplete="current-password" required></div>
+        <div class="field" id="cF" style="display:none"><label for="pw2">Passwort bestätigen</label><input type="password" id="pw2" autocomplete="new-password">
+            <div class="pw-req"><span id="rl">Mindestens 8 Zeichen</span><span id="rm">Passwörter stimmen überein</span></div>
+        </div>
+        <button type="submit" class="btn" id="sb">Anmelden</button>
+    </form>
+    <div class="hint" id="hint">Ersteinrichtung: Lege deinen Admin-Account an.</div>
+</div>
+<script>
+var isSetup=false;
+function check(){fetch('/api/auth/status').then(function(r){return r.json()}).then(function(d){if(d.authenticated){window.location.href='/app.html';return}if(d.needsSetup)setup()}).catch(function(){})}
+function setup(){isSetup=true;document.getElementById('sub').textContent='Ersteinrichtung';document.getElementById('hint').classList.add('show');document.getElementById('cF').style.display='block';document.getElementById('sb').textContent='Account erstellen';document.getElementById('user').placeholder='Benutzername wählen';document.getElementById('pw').placeholder='Passwort wählen';document.getElementById('pw2').placeholder='Passwort wiederholen'}
+function showErr(m){var e=document.getElementById('err');e.textContent=m;e.classList.add('show')}
+document.getElementById('pw2').addEventListener('input',function(){var p=document.getElementById('pw').value,c=document.getElementById('pw2').value;document.getElementById('rl').className=p.length>=8?'ok':'';document.getElementById('rm').className=(c&&p===c)?'ok':''});
+document.getElementById('frm').addEventListener('submit',function(e){
+e.preventDefault();var u=document.getElementById('user').value.trim(),p=document.getElementById('pw').value;if(!u){showErr('Benutzername eingeben');return}if(!p){showErr('Passwort eingeben');return}
+if(isSetup){var c=document.getElementById('pw2').value;if(p.length<8){showErr('Passwort mind. 8 Zeichen');return}if(p!==c){showErr('Passwörter stimmen nicht überein');return}
+fetch('/api/auth/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}).then(function(r){return r.json()}).then(function(d){if(d.success)window.location.href='/app.html';else showErr(d.message)}).catch(function(){showErr('Verbindungsfehler')})}
+else{fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}).then(function(r){return r.json()}).then(function(d){if(d.success)window.location.href='/app.html';else showErr(d.message)}).catch(function(){showErr('Verbindungsfehler')})}});
+check();
+</script>
+</body>
+</html>

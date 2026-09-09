@@ -1,0 +1,62 @@
+{
+  "name": "ac-server-manager",
+  "version": "1.0.0",
+  "description": "AzerothCore Server Manager",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "web": "node server.js",
+    "build": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "de.aureoncore.servermanager",
+    "productName": "AzerothCore Server Manager",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "server.js",
+      "server-runtime.js",
+      "auth.js",
+      "db.js",
+      "db-api.js",
+      "public/**/*",
+      "icon.*",
+      "!node_modules/.cache"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.png"
+    },
+    "portable": {
+      "artifactName": "AC-Server-Manager.exe"
+    },
+    "npmRebuild": false
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-session": "^1.18.1",
+    "mariadb": "^3.4.0",
+    "node-pty": "1.1.0",
+    "qs": "6.16.0",
+    "sql.js": "^1.11.0",
+    "ssh2": "1.16.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "overrides": {
+    "qs": "6.16.0"
+  }
+}
